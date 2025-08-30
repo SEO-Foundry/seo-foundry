@@ -126,7 +126,7 @@ export default function Page() {
   }, [variants]);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(1600px_circle_at_0%_-10%,#4f46e5_0%,rgba(79,70,229,0.12)_35%,transparent_60%),radial-gradient(1400px_circle_at_120%_110%,#059669_0%,rgba(5,150,105,0.12)_30%,transparent_60%),linear-gradient(to_bottom,#0b0b13,#0b0b13)] text-white">
+    <main className="min-h-[calc(100vh-5rem)] text-white">
       <div className="mx-auto max-w-screen-2xl px-5 py-8">
         {/* Header */}
         <header className="mb-6 flex items-center justify-between">
