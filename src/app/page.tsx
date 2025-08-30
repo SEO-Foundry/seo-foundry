@@ -3,8 +3,18 @@
 import { useCallback, useMemo, useState } from "react";
 import SidebarOptions, { type OptionSelections } from "@/app/_components/SidebarOptions";
 import UploadArea from "@/app/_components/UploadArea";
-import ResultGrid, { type VariantItem } from "@/app/_components/ResultGrid";
+import ResultGrid from "@/app/_components/ResultGrid";
 
+type VariantItem = {
+  id: string;
+  url: string;
+  filename: string;
+  meta: {
+    size: string;
+    style: string;
+    format: string;
+  };
+};
 
 const DEFAULT_SELECTIONS: OptionSelections = {
   sizes: ["1:1", "4:5", "9:16"],
@@ -122,7 +132,7 @@ export default function Page() {
         <header className="mb-6 flex items-center justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl font-bold tracking-tight">
-              <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">Pixel Forge</span>
+              SEO <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">Foundry</span>
             </h1>
             <p className="text-sm text-white/70">
               Upload an image, choose options, and generate beautiful variants optimized for your needs.

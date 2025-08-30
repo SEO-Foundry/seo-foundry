@@ -222,3 +222,33 @@ Defined in [package.json](package.json):
 - Environment schema: [src/env.js](src/env.js)
 - DB helper: [src/server/db.ts](src/server/db.ts)
 - Local DB script: [start-database.sh](start-database.sh)
+
+
+## 13) Dual-development: pixel-forge (temporary local integration)
+
+This repo is configured to allow co-developing seo-foundry alongside pixel-forge without publishing loops. The setup uses:
+- pnpm workspaces (see [pnpm-workspace.yaml](pnpm-workspace.yaml))
+- pixel-forge as a Git submodule mounted at packages/pixel-forge
+- workspace dependency resolution ("workspace:*") from this app to pixel-forge in [package.json](package.json)
+
+Quick start (after cloning seo-foundry):
+```bash
+# fetch submodule contents
+git submodule update --init --recursive
+
+# install and link workspaces
+pnpm install
+
+# run library watch in one terminal (if pixel-forge exposes "dev")
+pnpm --filter pixel-forge dev
+
+# run the app in another terminal
+pnpm dev
+```
+
+Notes:
+- Do not add packages/pixel-forge to .gitignore. As a Git submodule, the directory itself must be tracked by the parent repo and referenced from .gitmodules. The submodule’s own repo manages its internal ignores.
+- When pixel-forge is stable for seo-foundry, switch to a published npm version and remove the submodule; see the full workflow doc.
+
+Full workflow and removal steps are documented at:
+- [docs/dual-development.md](docs/dual-development.md)
