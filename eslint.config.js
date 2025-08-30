@@ -41,7 +41,9 @@ export default tseslint.config(
     },
     languageOptions: {
       parserOptions: {
+        // Enable multi-project awareness and set the root dir explicitly
         projectService: true,
+        tsconfigRootDir: import.meta.dirname,
       },
     },
   },
