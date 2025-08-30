@@ -1,13 +1,11 @@
 @import "tailwindcss";
 
-@theme {
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
-}
 
-/* Ensure bounce/overscroll background is not white */
+/* Ensure bounce/overscroll background is not white and define theme tokens without @theme */
 :root {
   color-scheme: dark;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
 html,
