@@ -1,18 +1,42 @@
 # Product Overview
 
-SEO Foundry is a web application for generating and managing visual assets for SEO and social media optimization. The application provides a user-friendly interface for creating favicons, Open Graph images, Twitter cards, and other visual assets across multiple platforms.
+SEO Foundry is a **unified platform and homebase** for independent SEO-related tools, serving as a one-stop shop for web developers. Rather than building monolithic features, SEO Foundry acts as a sophisticated front-end that integrates multiple specialized tools into a cohesive user experience.
 
-## Core Features
+## Platform Architecture
 
-- **Visual Asset Generation**: Create favicons, social media previews, and web assets
-- **Multi-Platform Support**: Generate assets optimized for various social platforms (Facebook, Twitter, LinkedIn, Instagram, TikTok)
-- **SEO Optimization**: Tools for improving search engine visibility through proper meta images and icons
-- **PWA Support**: Generate Progressive Web App icons and manifests
+- **Homebase Concept**: Central hub that orchestrates multiple independent SEO tools
+- **Tool Integration**: Each tool maintains its own repository and can be developed independently
+- **Unified Interface**: Single web application providing consistent UX across all tools
+- **Modular Approach**: Tools can be added, updated, or removed without affecting the core platform
 
-## Key Integration
+## Current Tool Integrations
 
-The application integrates with **pixel-forge**, a comprehensive asset generation library that handles the core image processing and generation logic, with future plans to integrate with other SEO tools This integration allows for programmatic creation of visual assets with consistent quality and formatting, targeted at making SEO easy.
+### pixel-forge
+
+- **Purpose**: Visual asset generation (favicons, Open Graph images, social media cards)
+- **Platforms**: Facebook, Twitter, LinkedIn, Instagram, TikTok, PWA icons
+- **Status**: Active integration via workspace dependency
+
+### schema-smith (Planned)
+
+- **Purpose**: Structured data and schema markup generation
+- **Focus**: JSON-LD, microdata, and SEO schema optimization
+- **Status**: Future integration
+
+### Additional Tools (Pipeline)
+
+- More specialized SEO tools will be integrated following the same pattern
+- Each tool remains independently maintainable and publishable
+
+## Core Value Proposition
+
+- **Developer Efficiency**: Single interface for multiple SEO workflows
+- **Consistent Experience**: Unified design and interaction patterns
+- **Tool Ecosystem**: Best-in-class specialized tools working together
+- **Simplified Deployment**: One application to deploy and maintain
 
 ## Target Users
 
-Web developers, SEO specialists, and content creators who need to generate professional visual assets for their websites and social media presence.
+- **Primary**: Web developers needing comprehensive SEO tooling
+- **Secondary**: SEO specialists, content creators, and digital marketers
+- **Use Case**: Teams wanting integrated SEO workflows without tool-switching overhead

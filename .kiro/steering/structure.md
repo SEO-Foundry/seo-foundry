@@ -57,16 +57,27 @@ src/trpc/
 ### Styling
 - `src/styles/globals.css` - Global styles and Tailwind imports
 
-## Workspace Integration
+## Workspace Integration (Multi-Tool Architecture)
 
-### Pixel Forge Package
+SEO Foundry uses a workspace-based architecture to integrate multiple independent SEO tools:
+
+### Current Tool Integrations
 ```
-packages/pixel-forge/     # Local development clone (git ignored)
-├── src/                 # TypeScript source
-├── dist/                # Compiled output
-├── package.json         # Independent package
-└── ...                  # Full pixel-forge repository
+packages/
+├── pixel-forge/         # Visual asset generation tool
+│   ├── src/            # TypeScript source
+│   ├── dist/           # Compiled output
+│   ├── package.json    # Independent package
+│   └── ...             # Full pixel-forge repository
+└── [future-tools]/     # Additional SEO tools (schema-smith, etc.)
 ```
+
+### Integration Pattern
+- Each tool maintains its own Git repository
+- Local clones in `packages/` for dual-development
+- Workspace dependencies (`"workspace:*"`) for immediate linking
+- Tools are Git-ignored by parent repo during development
+- Eventually published as independent npm packages
 
 ## Key Conventions
 

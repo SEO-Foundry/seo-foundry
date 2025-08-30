@@ -27,7 +27,11 @@
 - **@tanstack/react-query** - Server state management
 - **@t3-oss/env-nextjs** - Environment variable validation
 - **superjson** - JSON serialization for tRPC
-- **pixel-forge** - Asset generation library (workspace dependency)
+
+## Integrated SEO Tools (Workspace Dependencies)
+- **pixel-forge** - Visual asset generation (favicons, social cards, PWA icons)
+- **schema-smith** - Structured data and schema markup (planned)
+- **Additional tools** - Future SEO utilities following same integration pattern
 
 ## Common Commands
 

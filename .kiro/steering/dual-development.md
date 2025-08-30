@@ -2,15 +2,27 @@
 
 ## Overview
 
-This project uses a **temporary dual-development setup** to co-develop `seo-foundry` and `pixel-forge` simultaneously without publishing loops. This is a local development convenience that will eventually be replaced with a standard npm dependency.
+SEO Foundry uses a **multi-tool dual-development setup** to co-develop the platform alongside multiple independent SEO tools simultaneously. This workspace-based approach allows for:
+
+- **Unified Development**: Work on SEO Foundry and its integrated tools in parallel
+- **Tool Independence**: Each tool maintains its own repository and can be developed separately
+- **Immediate Integration**: Changes in tools are instantly available to the platform
+- **Future Flexibility**: Tools can be published independently when stable
+
+Currently integrated: `pixel-forge` (visual assets)
+Planned integrations: `schema-smith` (structured data), and additional SEO tools
 
 ## Critical Guidelines for AI Assistants
 
 ### Repository Boundaries
-- **PRIMARY REPO**: `seo-foundry` (this repository) - Main application development
-- **SECONDARY REPO**: `packages/pixel-forge/` - Local clone for integration testing only
-- **NEVER modify files in `packages/pixel-forge/`** - This is a separate Git repository
-- All development should happen in the main `seo-foundry` codebase unless explicitly working on pixel-forge
+- **PRIMARY REPO**: `seo-foundry` (this repository) - Platform and UI development
+- **TOOL REPOS**: `packages/[tool-name]/` - Local clones for integration testing only
+  - `packages/pixel-forge/` - Visual asset generation tool
+  - `packages/schema-smith/` - Future structured data tool
+  - Additional tools as they're integrated
+- **NEVER modify files in `packages/[tool-name]/`** - These are separate Git repositories
+- All platform development happens in the main `seo-foundry` codebase
+- Tool-specific development should be done in their respective repositories
 
 ### Workspace Configuration
 - Uses pnpm workspaces via `pnpm-workspace.yaml`
@@ -27,30 +39,34 @@ pnpm dev                         # Terminal 2: seo-foundry dev server
 
 ## Integration Patterns
 
-### Using pixel-forge in seo-foundry
-- **Server-side only**: Use pixel-forge in Node.js runtime contexts
-- **tRPC procedures**: Create routers in `src/server/api/routers/` for pixel-forge operations
+### Using integrated tools in seo-foundry
+- **Server-side only**: Use tools in Node.js runtime contexts
+- **tRPC procedures**: Create routers in `src/server/api/routers/` for tool operations
 - **API routes**: Use in `src/app/api/` route handlers with Node runtime
 - **Return serializable data**: URLs, base64 strings, metadata - NOT Node Buffers
+- **Tool-specific pages**: Create dedicated pages like `/pixel-forge`, `/schema-smith`
 
-### File Locations for pixel-forge Integration
-- tRPC routers: `src/server/api/routers/[feature].ts`
-- API routes: `src/app/api/[endpoint]/route.ts`
-- Server utilities: `src/server/utils/`
+### File Locations for Tool Integration
+- tRPC routers: `src/server/api/routers/[tool-name].ts` (e.g., `pixel-forge.ts`, `schema-smith.ts`)
+- API routes: `src/app/api/[tool-name]/route.ts`
+- Tool pages: `src/app/[tool-name]/page.tsx`
+- Server utilities: `src/server/utils/[tool-name]/`
 
 ## Temporary Nature
 
 ### Current State
-- Local clone workflow for active co-development
-- Immediate feedback loop between changes
-- No publishing required during development
+- Multi-tool workspace for active co-development
+- Immediate feedback loop between platform and tools
+- No publishing required during development phase
+- Each tool can be developed and tested independently
 
-### Future Migration
-When pixel-forge stabilizes:
-1. Publish pixel-forge to npm registry
-2. Update dependency to `"pixel-forge": "^X.Y.Z"`
-3. Remove local clone: `rm -rf packages/pixel-forge`
-4. Continue with standard npm dependency
+### Future Migration (Per Tool)
+When individual tools stabilize:
+1. Publish tool to npm registry (e.g., `pixel-forge@X.Y.Z`)
+2. Update dependency to standard npm version
+3. Remove local clone: `rm -rf packages/[tool-name]`
+4. Continue with published dependency
+5. Repeat process for each tool as they mature
 
 ## Troubleshooting
 
@@ -68,7 +84,8 @@ ls -la packages/pixel-forge       # Should exist and contain pixel-forge repo
 
 ## Key Reminders
 
-1. **Stay in seo-foundry**: All UI, API, and application logic belongs here
-2. **pixel-forge is read-only**: Don't modify files in `packages/pixel-forge/`
-3. **Server-side integration**: Only use pixel-forge in Node.js contexts
-4. **Temporary setup**: This will be replaced with npm dependency later
+1. **Stay in seo-foundry**: All platform UI, API, and integration logic belongs here
+2. **Tools are read-only**: Don't modify files in `packages/[tool-name]/` directories
+3. **Server-side integration**: Only use tools in Node.js contexts
+4. **Multi-tool architecture**: Each tool follows the same integration pattern
+5. **Temporary setup**: Local clones will be replaced with npm dependencies when tools stabilize
