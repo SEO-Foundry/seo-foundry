@@ -228,13 +228,14 @@ Defined in [package.json](package.json):
 
 This repo is configured to allow co-developing seo-foundry alongside pixel-forge without publishing loops. The setup uses:
 - pnpm workspaces (see [pnpm-workspace.yaml](pnpm-workspace.yaml))
-- pixel-forge as a Git submodule mounted at packages/pixel-forge
+- pixel-forge cloned locally at packages/pixel-forge (ignored by the parent repo; see [.gitignore](.gitignore))
 - workspace dependency resolution ("workspace:*") from this app to pixel-forge in [package.json](package.json)
 
 Quick start (after cloning seo-foundry):
 ```bash
-# fetch submodule contents
-git submodule update --init --recursive
+# clone pixel-forge locally into packages/
+mkdir -p packages
+git clone git@github.com:devints47/pixel-forge.git packages/pixel-forge
 
 # install and link workspaces
 pnpm install
@@ -247,8 +248,8 @@ pnpm dev
 ```
 
 Notes:
-- Do not add packages/pixel-forge to .gitignore. As a Git submodule, the directory itself must be tracked by the parent repo and referenced from .gitmodules. The submodule’s own repo manages its internal ignores.
-- When pixel-forge is stable for seo-foundry, switch to a published npm version and remove the submodule; see the full workflow doc.
+- packages/pixel-forge is intentionally ignored by the parent repo for this local-clone workflow. If you later switch to a Git submodule workflow instead, remove that ignore so the submodule can be tracked by the parent repo.
+- When pixel-forge is stable for seo-foundry, switch to a published npm version and remove the local clone; see the full workflow doc.
 
 Full workflow and removal steps are documented at:
 - [docs/dual-development.md](docs/dual-development.md)

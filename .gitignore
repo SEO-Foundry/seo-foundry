@@ -47,3 +47,8 @@ yarn-error.log*
 
 # kilocode
 .kilocode/
+
+# local development clones (not submodules)
+# When using a plain git clone of pixel-forge inside packages/, keep it ignored in the parent repo.
+# If you switch back to a Git submodule workflow, REMOVE this ignore so the submodule is tracked.
+packages/pixel-forge/
