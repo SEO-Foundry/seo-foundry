@@ -9,7 +9,7 @@ Contents
 - Using pixel-forge in seo-foundry
 - Teammate onboarding
 - Switching back to published npm package
-- Alternative: submodule workflow (optional)
+- Alternative: submodule worflow (optional)
 - Troubleshooting
 
 ## Why local clone vs submodule
