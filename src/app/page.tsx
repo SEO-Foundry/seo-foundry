@@ -1,347 +1,166 @@
-"use client";
+import Link from "next/link";
 
-import { useCallback, useMemo, useState } from "react";
-import SidebarOptions, { type OptionSelections } from "@/app/_components/SidebarOptions";
-import UploadArea from "@/app/_components/UploadArea";
-import ResultGrid from "@/app/_components/ResultGrid";
-
-type VariantItem = {
-  id: string;
-  url: string;
-  filename: string;
-  meta: {
-    size: string;
-    style: string;
-    format: string;
-  };
-};
-
-const DEFAULT_SELECTIONS: OptionSelections = {
-  sizes: ["1:1", "4:5", "9:16"],
-  styles: ["Vibrant", "Muted", "Mono"],
-  formats: ["PNG"],
-  padding: true,
-  border: false,
-};
-
-const SIZE_TO_RATIO: Record<OptionSelections["sizes"][number], number> = {
-  "1:1": 1 / 1,
-  "4:5": 4 / 5, // width / height
-  "9:16": 9 / 16,
-};
-
-const FORMAT_TO_MIME: Record<OptionSelections["formats"][number], string> = {
-  PNG: "image/png",
-  JPEG: "image/jpeg",
-  WEBP: "image/webp",
-};
-
-export default function Page() {
-  const [selections, setSelections] = useState<OptionSelections>(DEFAULT_SELECTIONS);
-  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
-  const [sourceName, setSourceName] = useState<string>("image");
-  const [generating, setGenerating] = useState(false);
-  const [variants, setVariants] = useState<VariantItem[]>([]);
-
-  const canGenerate = useMemo(() => {
-    return !!sourceUrl && selections.sizes.length && selections.styles.length && selections.formats.length;
-  }, [sourceUrl, selections]);
-
-  const onUpload = useCallback((file: File, url: string) => {
-    setSourceUrl(url);
-    setSourceName(file.name?.replace(/\.[a-zA-Z0-9]+$/, "") || "image");
-    setVariants([]);
-  }, []);
-
-  const onClearUpload = useCallback(() => {
-    setSourceUrl(null);
-    setVariants([]);
-  }, []);
-
-  const onClearResults = useCallback(() => {
-    setVariants([]);
-  }, []);
-
-  const generate = useCallback(async () => {
-    if (!sourceUrl) return;
-    setGenerating(true);
-
-    try {
-      const img = await loadImage(sourceUrl);
-
-      // Base render width to keep file sizes sane for a mock. Height derived by ratio.
-      const BASE_WIDTH = 896;
-
-      const newVariants: VariantItem[] = [];
-
-      for (const size of selections.sizes) {
-        const ratio = SIZE_TO_RATIO[size];
-        const width = BASE_WIDTH;
-        const height = Math.round(width / ratio);
-
-        for (const style of selections.styles) {
-          for (const format of selections.formats) {
-            const url = await renderVariant({
-              img,
-              width,
-              height,
-              style,
-              padding: selections.padding,
-              border: selections.border,
-              mime: FORMAT_TO_MIME[format],
-            });
-
-            const suffixSize = size.replace(":", "x");
-            const suffixStyle = style.toLowerCase();
-            const ext = format.toLowerCase();
-            const filename = `${sourceName}_${suffixSize}_${suffixStyle}.${ext}`;
-
-            newVariants.push({
-              id: `${size}-${style}-${format}-${Math.random().toString(36).slice(2, 8)}`,
-              url,
-              filename,
-              meta: { size, style, format },
-            });
-          }
-        }
-      }
-
-      setVariants(newVariants);
-    } finally {
-      setGenerating(false);
-    }
-  }, [sourceUrl, selections, sourceName]);
-
-  const onDownloadOne = useCallback((v: VariantItem) => {
-    triggerDownload(v.url, v.filename);
-  }, []);
-
-  const onDownloadAll = useCallback(async () => {
-    // Sequential downloads (simple mock without zipping)
-    for (const v of variants) {
-      // Small delay helps some browsers accept multiple downloads
-      await delay(80);
-      triggerDownload(v.url, v.filename);
-    }
-  }, [variants]);
-
+export default function Home() {
   return (
     <main className="min-h-screen bg-[radial-gradient(1600px_circle_at_0%_-10%,#4f46e5_0%,rgba(79,70,229,0.12)_35%,transparent_60%),radial-gradient(1400px_circle_at_120%_110%,#059669_0%,rgba(5,150,105,0.12)_30%,transparent_60%),linear-gradient(to_bottom,#0b0b13,#0b0b13)] text-white">
-      <div className="mx-auto max-w-screen-2xl px-5 py-8">
-        {/* Header */}
-        <header className="mb-6 flex items-center justify-between">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold tracking-tight">
-              SEO <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">Foundry</span>
-            </h1>
-            <p className="text-sm text-white/70">
-              Upload an image, choose options, and generate beautiful variants optimized for your needs.
+      <div className="mx-auto max-w-7xl px-6 py-16">
+        {/* Hero */}
+        <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-white/5 p-10 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(1000px_800px_at_0%_-10%,rgba(99,102,241,0.18),transparent_55%),radial-gradient(900px_800px_at_100%_110%,rgba(16,185,129,0.18),transparent_55%)]" />
+          <div className="relative z-10 grid gap-8 lg:grid-cols-[1.2fr,0.8fr]">
+            <div>
+              <p className="mb-2 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] tracking-wide text-white/70">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                A blacksmith’s shop for modern SEO
+              </p>
+              <h1 className="mb-4 text-4xl font-extrabold tracking-tight sm:text-5xl">
+                <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">
+                  SEO Foundry
+                </span>
+              </h1>
+              <p className="max-w-2xl text-balance text-white/80">
+                A collection of handcrafted tools for bootstrapping everything your site
+                needs to be discoverable and fast. Forge pixel-perfect social previews,
+                favicons, PWA icons, and pristine metadata. Then shape your structured data
+                with schema utilities — all from one workshop.
+              </p>
+
+              <div className="mt-8 flex flex-wrap items-center gap-3">
+                <span className="rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
+                  Next.js App Router
+                </span>
+                <span className="rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
+                  Tailwind 4.1
+                </span>
+                <span className="rounded-md border border-white/10 bg-white/5 px-3 py-1 text-xs text-white/70">
+                  tRPC • Prisma • PostgreSQL
+                </span>
+              </div>
+            </div>
+
+            <div className="relative">
+              <div className="relative mx-auto h-56 w-full overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/5 to-white/0 p-6 ring-1 ring-inset ring-white/5">
+                <div className="absolute inset-0 -z-10 bg-[radial-gradient(800px_circle_at_70%_20%,rgba(99,102,241,0.18),transparent_55%),radial-gradient(700px_circle_at_10%_100%,rgba(16,185,129,0.18),transparent_55%)]" />
+                <div className="flex h-full items-center justify-center">
+                  <svg
+                    viewBox="0 0 200 200"
+                    className="h-28 w-28 text-white/80"
+                    aria-hidden="true"
+                  >
+                    <defs>
+                      <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#a5b4fc" />
+                        <stop offset="100%" stopColor="#6ee7b7" />
+                      </linearGradient>
+                    </defs>
+                    <path
+                      d="M40 140c0-30 40-30 40-60 0-15-10-25-10-40 0-10 10-20 30-20s30 10 30 20c0 15-10 25-10 40 0 30 40 30 40 60 0 20-25 30-50 30s-50-10-50-30z"
+                      fill="url(#grad)"
+                      fillOpacity="0.85"
+                    />
+                    <path
+                      d="M80 150c15 10 25 10 40 0"
+                      stroke="white"
+                      strokeOpacity="0.7"
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                </div>
+              </div>
+              <p className="mt-3 text-center text-xs text-white/60">
+                Beautiful defaults, strong steel. Bring your brand — we’ll do the rest.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Cards */}
+        <section className="relative mt-12">
+          <div className="mb-6">
+            <h2 className="text-lg font-semibold tracking-wide text-white/90">
+              Tools on the Anvil
+            </h2>
+            <p className="mt-1 text-sm text-white/60">
+              Explore focused, production-ready utilities — forged to accelerate new builds.
             </p>
           </div>
 
-          <div className="hidden items-center gap-2 sm:flex">
-            <span className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/70">
-              Tailwind 4.1
-            </span>
-            <span className="rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/70">
-              Next.js App Router
-            </span>
-          </div>
-        </header>
-
-        {/* Shell */}
-        <div className="grid grid-cols-12 gap-5">
-          {/* Sidebar */}
-          <div className="col-span-12 md:col-span-4 lg:col-span-3">
-            <SidebarOptions value={selections} onChange={setSelections} />
-          </div>
-
-          {/* Canvas */}
-          <div className="col-span-12 md:col-span-8 lg:col-span-9">
-            <section className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] backdrop-blur">
-              {/* Upload */}
-              <UploadArea previewUrl={sourceUrl ?? null} onUpload={onUpload} onClear={onClearUpload} />
-
-              {/* Actions */}
-              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={!canGenerate || generating}
-                    onClick={generate}
-                    className={[
-                      "rounded-md px-4 py-2 text-sm font-medium transition",
-                      canGenerate && !generating
-                        ? "border border-emerald-400/30 bg-emerald-400/10 text-emerald-100 hover:bg-emerald-400/15"
-                        : "cursor-not-allowed border border-white/10 bg-white/5 text-white/50",
-                    ].join(" ")}
-                  >
-                    {generating ? "Generating..." : "Generate"}
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled={!variants.length}
-                    onClick={onDownloadAll}
-                    className={[
-                      "rounded-md px-3 py-2 text-xs font-medium transition",
-                      variants.length
-                        ? "border border-white/10 bg-white/10 text-white/85 hover:bg-white/20"
-                        : "cursor-not-allowed border border-white/10 bg-white/5 text-white/50",
-                    ].join(" ")}
-                  >
-                    Download All
-                  </button>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+            {/* Pixel Forge */}
+            <Link
+              href="/pixel-forge"
+              className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 transition hover:border-emerald-400/30 hover:bg-white/10"
+            >
+              <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(600px_circle_at_0%_0%,rgba(99,102,241,0.16),transparent_55%),radial-gradient(700px_circle_at_100%_100%,rgba(16,185,129,0.16),transparent_55%)]" />
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-emerald-400/20 bg-emerald-400/10 px-2.5 py-0.5 text-[10px] font-medium text-emerald-100">
+                    Image & Metadata
+                  </div>
+                  <h3 className="text-xl font-semibold text-white/95">
+                    Pixel Forge
+                  </h3>
+                  <p className="mt-1 max-w-[42ch] text-sm text-white/70">
+                    Generate favicons, PWA icons, OpenGraph images, and plug-and-play
+                    metadata. One source image, a full kit of assets — fast.
+                  </p>
                 </div>
-
-                <div className="text-xs text-white/60">
-                  {variants.length ? `${variants.length} variants ready` : "No variants yet"}
+                <span className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[10px] text-white/75 transition group-hover:border-emerald-400/30 group-hover:bg-emerald-400/10 group-hover:text-emerald-100">
+                  Open
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-center text-xs text-white/70">
+                  Favicons
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-center text-xs text-white/70">
+                  PWA Icons
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-center text-xs text-white/70">
+                  Social Previews
                 </div>
               </div>
+            </Link>
 
-              {/* Results */}
-              <div className="mt-4">
-                <ResultGrid
-                  variants={variants}
-                  onDownloadOne={onDownloadOne}
-                  onDownloadAll={onDownloadAll}
-                  onClearResults={onClearResults}
-                />
+            {/* Schema Smith */}
+            <Link
+              href="/schema-smith"
+              className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-6 transition hover:border-indigo-400/30 hover:bg-white/10"
+            >
+              <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(600px_circle_at_100%_0%,rgba(99,102,241,0.16),transparent_55%),radial-gradient(700px_circle_at_0%_100%,rgba(16,185,129,0.16),transparent_55%)]" />
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-indigo-400/20 bg-indigo-400/10 px-2.5 py-0.5 text-[10px] font-medium text-indigo-100">
+                    Structured Data
+                  </div>
+                  <h3 className="text-xl font-semibold text-white/95">
+                    Schema Smith
+                  </h3>
+                  <p className="mt-1 max-w-[42ch] text-sm text-white/70">
+                    Craft JSON-LD quickly with guided presets for common pages and entities.
+                    Validate, preview, and ship with confidence.
+                  </p>
+                </div>
+                <span className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[10px] text-white/75 transition group-hover:border-indigo-400/30 group-hover:bg-indigo-400/10 group-hover:text-indigo-100">
+                  Coming Soon
+                </span>
               </div>
-            </section>
+              <div className="mt-4 grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-center text-xs text-white/70">
+                  JSON‑LD
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-center text-xs text-white/70">
+                  Presets
+                </div>
+                <div className="rounded-lg border border-white/10 bg-white/5 p-3 text-center text-xs text-white/70">
+                  Validation
+                </div>
+              </div>
+            </Link>
           </div>
-        </div>
+        </section>
       </div>
     </main>
   );
-}
-
-/**
- * Utilities
- */
-
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function triggerDownload(dataUrl: string, filename: string) {
-  const a = document.createElement("a");
-  a.href = dataUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-}
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-async function renderVariant(params: {
-  img: HTMLImageElement;
-  width: number;
-  height: number;
-  style: OptionSelections["styles"][number];
-  padding: boolean;
-  border: boolean;
-  mime: string;
-}): Promise<string> {
-  const { img, width, height, style, padding, border, mime } = params;
-
-  // Canvas and context
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d")!;
-  // background
-  ctx.fillStyle = "#0b0b13";
-  ctx.fillRect(0, 0, width, height);
-
-  // compute content box (padding as %)
-  const pad = padding ? Math.round(Math.min(width, height) * 0.06) : 0;
-  const contentX = pad;
-  const contentY = pad;
-  const contentW = width - pad * 2;
-  const contentH = height - pad * 2;
-
-  // Style filter
-  switch (style) {
-    case "Vibrant":
-      ctx.filter = "saturate(1.3) contrast(1.1) brightness(1.05)";
-      break;
-    case "Muted":
-      ctx.filter = "saturate(0.8) brightness(0.95) contrast(0.98)";
-      break;
-    case "Mono":
-      ctx.filter = "grayscale(1) contrast(1.1) brightness(1)";
-      break;
-  }
-
-  // draw image fitted into content box preserving aspect ratio, center crop if needed
-  drawFitted(ctx, img, contentX, contentY, contentW, contentH);
-
-  // Reset filter for overlays
-  ctx.filter = "none";
-
-  // Subtle overlay gradient for style flavor
-  const grad = ctx.createLinearGradient(0, 0, width, height);
-  if (style === "Vibrant") {
-    grad.addColorStop(0, "rgba(79,70,229,0.14)");
-    grad.addColorStop(1, "rgba(16,185,129,0.12)");
-  } else if (style === "Muted") {
-    grad.addColorStop(0, "rgba(148,163,184,0.10)");
-    grad.addColorStop(1, "rgba(51,65,85,0.10)");
-  } else {
-    grad.addColorStop(0, "rgba(255,255,255,0.04)");
-    grad.addColorStop(1, "rgba(0,0,0,0.12)");
-  }
-  ctx.fillStyle = grad;
-  ctx.fillRect(contentX, contentY, contentW, contentH);
-
-  // Border
-  if (border) {
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = Math.max(2, Math.round(Math.min(width, height) * 0.006));
-    ctx.strokeRect(contentX + ctx.lineWidth / 2, contentY + ctx.lineWidth / 2, contentW - ctx.lineWidth, contentH - ctx.lineWidth);
-  }
-
-  // Export
-  const quality = mime === "image/jpeg" ? 0.92 : 0.95;
-  return canvas.toDataURL(mime, quality);
-}
-
-function drawFitted(
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  dx: number,
-  dy: number,
-  dWidth: number,
-  dHeight: number,
-) {
-  const sRatio = img.width / img.height;
-  const dRatio = dWidth / dHeight;
-
-  let sx = 0;
-  let sy = 0;
-  let sWidth = img.width;
-  let sHeight = img.height;
-
-  if (sRatio > dRatio) {
-    // Source is wider: crop horizontally
-    sWidth = img.height * dRatio;
-    sx = (img.width - sWidth) / 2;
-  } else if (sRatio < dRatio) {
-    // Source is taller: crop vertically
-    sHeight = img.width / dRatio;
-    sy = (img.height - sHeight) / 2;
-  }
-
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight);
 }
