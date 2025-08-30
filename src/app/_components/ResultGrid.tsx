@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+
 export type VariantItem = {
   id: string;
   url: string;
@@ -63,11 +65,17 @@ export default function ResultGrid({
             key={v.id}
             className="group relative overflow-hidden rounded-lg border border-white/10 bg-white/5"
           >
-            <img
-              src={v.url}
-              alt={v.filename}
-              className="h-48 w-full object-cover transition will-change-transform group-hover:scale-[1.02]"
-            />
+            <div className="relative h-48 w-full">
+              <Image
+                src={v.url}
+                alt={v.filename}
+                fill
+                sizes="(max-width: 640px) 100vw, (max-width: 1280px) 33vw, 25vw"
+                className="object-cover transition will-change-transform group-hover:scale-[1.02]"
+                unoptimized
+                priority={false}
+              />
+            </div>
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(600px_circle_at_0%_0%,rgba(99,102,241,0.08),transparent_50%),radial-gradient(600px_circle_at_100%_100%,rgba(16,185,129,0.08),transparent_50%)]" />
             <figcaption className="flex items-center justify-between gap-2 border-t border-white/10 bg-gradient-to-b from-white/0 to-white/5 px-3 py-2">
               <div className="min-w-0">

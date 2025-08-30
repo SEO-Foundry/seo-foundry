@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import Image from "next/image";
 
 type Props = {
   previewUrl?: string | null;
@@ -100,11 +101,17 @@ export default function UploadArea({ previewUrl, onUpload, onClear }: Props) {
           </>
         ) : (
           <div className="relative h-full w-full">
-            <img
-              src={previewUrl}
-              alt="Preview"
-              className="h-full w-full rounded-lg object-contain"
-            />
+            <div className="relative h-full w-full rounded-lg overflow-hidden">
+              <Image
+                src={previewUrl}
+                alt="Preview"
+                fill
+                sizes="(max-width: 768px) 100vw, 75vw"
+                className="object-contain"
+                unoptimized
+                priority={false}
+              />
+            </div>
             <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-white/10" />
           </div>
         )}
