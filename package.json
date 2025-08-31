@@ -30,6 +30,7 @@
     "@trpc/react-query": "^11.0.0",
     "@trpc/server": "^11.0.0",
     "archiver": "^7.0.1",
+    "image-size": "^2.0.2",
     "mime-types": "^2.1.35",
     "next": "^15.2.3",
     "pixel-forge": "workspace:*",

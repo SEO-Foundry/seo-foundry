@@ -16,6 +16,7 @@ import archiver from "archiver";
 import type { Archiver } from "archiver";
 import { createWriteStream } from "fs";
 import { promises as fsp } from "fs";
+import { imageSize } from "image-size";
 
 // Helper to construct a stable file URL that a future route handler will serve
 function toFileUrl(sessionId: string, sessionRoot: string, absoluteFilePath: string): string {
@@ -146,28 +147,45 @@ export const pixelForgeRouter = createTRPCRouter({
         category: string;
         downloadUrl: string;
         previewUrl?: string;
+        width?: number;
+        height?: number;
+        bytes?: number;
       }> = [];
 
-      const pushFiles = (category: string, files?: string[]) => {
+      const pushFiles = async (category: string, files?: string[]) => {
         if (!files) return;
         for (const f of files) {
           const abs = path.isAbsolute(f) ? f : path.join(outDir, f);
           const url = toFileUrl(sessionId, sess.root, abs);
+          const st = await fsp.stat(abs).catch(() => null);
+          let width: number | undefined;
+          let height: number | undefined;
+          try {
+            const buf = await fsp.readFile(abs);
+            const dims = imageSize(buf);
+            width = dims.width;
+            height = dims.height;
+          } catch {
+            // ignore dimension extraction errors
+          }
           assets.push({
             fileName: path.basename(f),
             category,
             downloadUrl: url,
             previewUrl: url,
+            width,
+            height,
+            bytes: st?.size,
           });
         }
       };
 
-      pushFiles("favicon", result.files.favicon);
-      pushFiles("pwa", result.files.pwa);
-      pushFiles("social", result.files.social);
-      pushFiles("web", result.files.web);
-      pushFiles("seo", result.files.seo);
-      pushFiles("transparent", result.files.transparent);
+      await pushFiles("favicon", result.files.favicon);
+      await pushFiles("pwa", result.files.pwa);
+      await pushFiles("social", result.files.social);
+      await pushFiles("web", result.files.web);
+      await pushFiles("seo", result.files.seo);
+      await pushFiles("transparent", result.files.transparent);
 
       // Meta tags and manifest URLs
       const metaTagsFileUrl = toFileUrl(
