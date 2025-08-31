@@ -104,3 +104,55 @@ packages/
 - **API Layer**: All data access through tRPC procedures
 - **Database**: Single Prisma client instance exported from `src/server/db.ts`
 - **Type Safety**: End-to-end types from database to frontend via tRPC
+
+---
+
+## Pixel Forge Integration Highlights
+
+This section enumerates the concrete files, routes, and structure that make up the Pixel Forge feature to help orient dual-development and onboarding.
+
+### Key Server Files
+- Router: [pixel-forge.ts](src/server/api/routers/pixel-forge.ts:1)
+  - Exposes procedures: newSession, uploadImage, generateAssets, getGenerationProgress, zipAssets, cleanupSession, cleanupExpired
+  - Enforces rate limits and per-session locks via [security.ts](src/server/lib/security.ts:1)
+  - Annotates asset metadata (dimensions/bytes) and returns safe URLs under our file-serving route
+- Engine detection: [deps.ts](src/server/lib/pixel-forge/deps.ts:1)
+  - [ensureImageEngine()](src/server/lib/pixel-forge/deps.ts:10) prefers ImageMagick, falls back to Jimp
+- Session management & FS layout: [session.ts](src/server/lib/pixel-forge/session.ts:1)
+  - Creates per-session root with directories/files:
+    - uploads/
+    - generated/
+    - progress.json
+    - session.json
+  - Provides helpers for upload (MIME allow-list, size caps), progress/meta read/write, TTL cleanup
+- Security utilities: [security.ts](src/server/lib/security.ts:1)
+  - [enforceFixedWindowLimit()](src/server/lib/security.ts:15), [limiterKey()](src/server/lib/security.ts:54)
+  - [acquireLock()](src/server/lib/security.ts:75)/[releaseLock()](src/server/lib/security.ts:80) for per-session concurrency
+
+### File-Serving Route (Node runtime)
+- Route handler: [route.ts](src/app/api/pixel-forge/files/[sessionId]/[...filePath]/route.ts:1)
+  - Confines paths to the per-session root; blocks traversal
+  - Adds ETag/Last-Modified, 304 support, nosniff, and ZIP attachment headers
+  - Serves only files generated/owned by the current session
+
+### UI Surface
+- Feature page: [page.tsx](src/app/pixel-forge/page.tsx:1)
+  - Uploads via tRPC, triggers generation, polls progress, displays results, offers ZIP download
+- Components:
+  - [SidebarOptions.tsx](src/app/_components/SidebarOptions.tsx:1) — generation toggles, metadata, output options
+  - [ResultGrid.tsx](src/app/_components/ResultGrid.tsx:1) — grouped assets, previews, dimensions/bytes, lightbox
+
+### Testing Artifacts
+- Vitest config & alias:
+  - [vitest.config.defineConfig()](vitest.config.ts:4) — Node env, @ → src alias, excludes .d.ts from collection
+  - Tests tsconfig: [tests/tsconfig.json](tests/tsconfig.json:1)
+- Suites:
+  - Router and integration paths: [router.test.ts](tests/pixel-forge/router.test.ts:1)
+    - Mocks `pixel-forge` (ImageProcessor + generateAssets) for deterministic runs
+  - Security utilities: [security.test.ts](tests/pixel-forge/security.test.ts:1)
+
+### Routing & Data Flow Summary
+1. Client invokes tRPC procedures on [pixel-forge.ts](src/server/api/routers/pixel-forge.ts:1)
+2. Router coordinates session, engine, generation, and progress updates
+3. Generated files are read back through [route.ts](src/app/api/pixel-forge/files/[sessionId]/[...filePath]/route.ts:1) with safe headers and confinement
+4. UI renders assets/metadata and exposes ZIP bundling via router

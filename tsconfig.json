@@ -24,6 +24,9 @@
     "plugins": [{ "name": "next" }],
     "incremental": true,
 
+    /* Test/Node Types */
+    "types": ["vitest", "vitest/globals", "node"],
+
     /* Path Aliases */
     "baseUrl": ".",
     "paths": {
@@ -32,9 +35,13 @@
   },
   "include": [
     "next-env.d.ts",
+    "src/**/*.d.ts",
     "src/**/*.ts",
     "src/**/*.tsx",
+    "tests/**/*.ts",
+    "tests/**/*.tsx",
     "packages/pixel-forge/src/**/*.ts",
+    "vitest.config.ts",
     "**/*.cjs",
     ".next/types/**/*.ts"
   ],

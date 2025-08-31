@@ -1,9 +1,14 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import SidebarOptions, { type OptionSelections } from "@/app/_components/SidebarOptions";
+import SidebarOptions, { type PixelForgeSelections } from "@/app/_components/SidebarOptions";
 import UploadArea from "@/app/_components/UploadArea";
 import ResultGrid from "@/app/_components/ResultGrid";
+import { api } from "@/trpc/react";
+
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@/server/api/root";
+type GenRes = inferRouterOutputs<AppRouter>["pixelForge"]["generateAssets"];
 
 type VariantItem = {
   id: string;
@@ -16,114 +21,195 @@ type VariantItem = {
   };
 };
 
-const DEFAULT_SELECTIONS: OptionSelections = {
-  sizes: ["1:1", "4:5", "9:16"],
-  styles: ["Vibrant", "Muted", "Mono"],
-  formats: ["PNG"],
-  padding: true,
-  border: false,
+type ServerAsset = {
+  fileName: string;
+  category: string;
+  downloadUrl: string;
+  previewUrl?: string;
 };
 
-const SIZE_TO_RATIO: Record<OptionSelections["sizes"][number], number> = {
-  "1:1": 1 / 1,
-  "4:5": 4 / 5, // width / height
-  "9:16": 9 / 16,
+const DEFAULT_SELECTIONS: PixelForgeSelections = {
+  generationTypes: ["all"],
+  transparent: false,
+  appName: "",
+  description: "",
+  themeColor: "",
+  backgroundColor: "",
+  format: "png",
+  quality: 90,
+  urlPrefix: "",
 };
 
-const FORMAT_TO_MIME: Record<OptionSelections["formats"][number], string> = {
-  PNG: "image/png",
-  JPEG: "image/jpeg",
-  WEBP: "image/webp",
-};
+
 
 export default function Page() {
-  const [selections, setSelections] = useState<OptionSelections>(DEFAULT_SELECTIONS);
+  const [selections, setSelections] = useState<PixelForgeSelections>(DEFAULT_SELECTIONS);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
-  const [sourceName, setSourceName] = useState<string>("image");
   const [generating, setGenerating] = useState(false);
   const [variants, setVariants] = useState<VariantItem[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [storedPath, setStoredPath] = useState<string | null>(null);
+  const [metaHtml, setMetaHtml] = useState<string | null>(null);
+  const [metaFileUrl, setMetaFileUrl] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
 
+  const uploadImage = api.pixelForge.uploadImage.useMutation();
+  const cleanupSession = api.pixelForge.cleanupSession.useMutation();
+  const generateAssetsMutation = api.pixelForge.generateAssets.useMutation();
+  const zipAssetsMutation = api.pixelForge.zipAssets.useMutation();
+
+// Progress polling for generation
+const sid = sessionId ?? "00000000-0000-0000-0000-000000000000";
+const progressQuery = api.pixelForge.getGenerationProgress.useQuery(
+  { sessionId: sid },
+  { enabled: generating && !!sessionId, refetchInterval: generating ? 600 : false }
+);
+const progressData = progressQuery.data;
+const progressTotal = progressData?.total ?? 100;
+const progressCurrent = progressData?.current ?? 0;
+const progressPct =
+  progressTotal > 0 ? Math.min(100, Math.round((progressCurrent / progressTotal) * 100)) : 0;
+const progressOp = progressData?.currentOperation ?? "Working...";
   const canGenerate = useMemo(() => {
-    return !!sourceUrl && selections.sizes.length && selections.styles.length && selections.formats.length;
-  }, [sourceUrl, selections]);
+    return !!sessionId && !!storedPath;
+  }, [sessionId, storedPath]);
 
-  const onUpload = useCallback((file: File, url: string) => {
-    setSourceUrl(url);
-    setSourceName(file.name?.replace(/\.[a-zA-Z0-9]+$/, "") || "image");
-    setVariants([]);
-  }, []);
+  const onUpload = useCallback(async (file: File, dataUrl: string) => {
+    try {
+      setErrorMsg(null);
+      const base64 = dataUrl.split(",")[1] ?? "";
+      const res = await uploadImage.mutateAsync({
+        fileName: file.name,
+        fileData: base64,
+        mimeType: file.type || "image/png",
+        sessionId: sessionId ?? undefined,
+      });
+      setSessionId(res.sessionId);
+      setStoredPath(res.storedPath);
+      setSourceUrl(res.previewUrl);
+      setVariants([]);
+    } catch (err) {
+      console.error("[pixel-forge] upload failed", err);
+      setErrorMsg(readableError(err, "Upload failed. Please check file type and size."));
+    }
+  }, [uploadImage, sessionId]);
 
-  const onClearUpload = useCallback(() => {
-    setSourceUrl(null);
-    setVariants([]);
-  }, []);
+  const onClearUpload = useCallback(async () => {
+    try {
+      if (sessionId) {
+        await cleanupSession.mutateAsync({ sessionId });
+      }
+    } catch (err) {
+      console.warn("[pixel-forge] cleanup warning", err);
+    } finally {
+      setSourceUrl(null);
+      setSessionId(null);
+      setStoredPath(null);
+      setVariants([]);
+      setMetaHtml(null);
+      setMetaFileUrl(null);
+      setErrorMsg(null);
+      setInfoMsg(null);
+    }
+  }, [sessionId, cleanupSession]);
 
   const onClearResults = useCallback(() => {
     setVariants([]);
   }, []);
 
   const generate = useCallback(async () => {
-    if (!sourceUrl) return;
+    if (!sessionId || !storedPath) return;
     setGenerating(true);
-
     try {
-      const img = await loadImage(sourceUrl);
+      setErrorMsg(null);
+      setInfoMsg(null);
+      const res: GenRes = await generateAssetsMutation.mutateAsync({
+        sessionId,
+        imagePath: storedPath,
+        options: {
+          generationTypes:
+            (selections.generationTypes?.length ?? 0) > 0 ? selections.generationTypes : ["all"],
+          transparent: Boolean(selections.transparent),
+          appName: selections.appName ?? undefined,
+          description: selections.description ?? undefined,
+          themeColor: selections.themeColor ?? undefined,
+          backgroundColor: selections.backgroundColor ?? undefined,
+          format: selections.format,
+          quality: selections.quality,
+          urlPrefix: selections.urlPrefix ?? undefined,
+        },
+      });
 
-      // Base render width to keep file sizes sane for a mock. Height derived by ratio.
-      const BASE_WIDTH = 896;
-
-      const newVariants: VariantItem[] = [];
-
-      for (const size of selections.sizes) {
-        const ratio = SIZE_TO_RATIO[size];
-        const width = BASE_WIDTH;
-        const height = Math.round(width / ratio);
-
-        for (const style of selections.styles) {
-          for (const format of selections.formats) {
-            const url = await renderVariant({
-              img,
-              width,
-              height,
-              style,
-              padding: selections.padding,
-              border: selections.border,
-              mime: FORMAT_TO_MIME[format],
-            });
-
-            const suffixSize = size.replace(":", "x");
-            const suffixStyle = style.toLowerCase();
-            const ext = format.toLowerCase();
-            const filename = `${sourceName}_${suffixSize}_${suffixStyle}.${ext}`;
-
-            newVariants.push({
-              id: `${size}-${style}-${format}-${Math.random().toString(36).slice(2, 8)}`,
-              url,
-              filename,
-              meta: { size, style, format },
-            });
-          }
-        }
-      }
-
+      const newVariants: VariantItem[] = (res.assets as ServerAsset[]).map((a: ServerAsset) => {
+        const ext = a.fileName.split(".").pop()?.toUpperCase() ?? "PNG";
+        const re = /(\d{2,4})x(\d{2,4})/;
+        const dimsMatch = re.exec(a.fileName);
+        const dimStr = dimsMatch ? `${dimsMatch[1]}x${dimsMatch[2]}` : "";
+        return {
+          id: `${a.category}-${a.fileName}`,
+          url: a.previewUrl ?? a.downloadUrl,
+          filename: a.fileName,
+          meta: {
+            size: dimStr || a.category,
+            style: a.category,
+            format: ext,
+          },
+        };
+      });
       setVariants(newVariants);
+      // Capture meta tags for display section
+      setMetaHtml(res.metaTags?.html ?? null);
+      setMetaFileUrl(res.metaTags?.fileUrl ?? null);
+      // Engine guidance (e.g., ImageMagick recommendation)
+      const engineInfo = (res as unknown as { engine?: string; engineNote?: string });
+      if (engineInfo.engine && engineInfo.engine !== "magick") {
+        const note = engineInfo.engineNote ?? "Install ImageMagick for best quality (brew install imagemagick).";
+        setInfoMsg(`Using ${engineInfo.engine}. ${note}`);
+      }
+    } catch (err) {
+      console.error("[pixel-forge] generation failed", err);
+      setErrorMsg(readableError(err, "Generation failed. Please try again."));
     } finally {
       setGenerating(false);
     }
-  }, [sourceUrl, selections, sourceName]);
+  }, [
+    sessionId,
+    storedPath,
+    generateAssetsMutation,
+    selections.generationTypes,
+    selections.transparent,
+    selections.appName,
+    selections.description,
+    selections.themeColor,
+    selections.backgroundColor,
+    selections.format,
+    selections.quality,
+    selections.urlPrefix,
+  ]);
 
   const onDownloadOne = useCallback((v: VariantItem) => {
     triggerDownload(v.url, v.filename);
   }, []);
 
   const onDownloadAll = useCallback(async () => {
-    // Sequential downloads (simple mock without zipping)
-    for (const v of variants) {
-      // Small delay helps some browsers accept multiple downloads
-      await delay(80);
-      triggerDownload(v.url, v.filename);
+    if (!sessionId) return;
+    try {
+      setErrorMsg(null);
+      const res = await zipAssetsMutation.mutateAsync({ sessionId });
+      if (res.zipUrl) {
+        triggerDownload(res.zipUrl, "pixel-forge-assets.zip");
+      }
+    } catch (err) {
+      console.error("[pixel-forge] zip download failed", err);
+      setErrorMsg(readableError(err, "ZIP creation failed. Falling back to individual downloads."));
+      // Fallback: sequential downloads
+      for (const v of variants) {
+        await delay(80);
+        triggerDownload(v.url, v.filename);
+      }
     }
-  }, [variants]);
+  }, [sessionId, variants, zipAssetsMutation]);
 
   return (
     <main className="min-h-[calc(100vh-5rem)] text-white">
@@ -159,6 +245,17 @@ export default function Page() {
           {/* Canvas */}
           <div className="col-span-12 md:col-span-8 lg:col-span-9">
             <section className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] backdrop-blur">
+              {/* Alerts */}
+              {errorMsg ? (
+                <div className="mb-3 rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                  {errorMsg}
+                </div>
+              ) : null}
+              {infoMsg ? (
+                <div className="mb-3 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  {infoMsg}
+                </div>
+              ) : null}
               {/* Upload */}
               <UploadArea previewUrl={sourceUrl ?? null} onUpload={onUpload} onClear={onClearUpload} />
 
@@ -181,21 +278,38 @@ export default function Page() {
 
                   <button
                     type="button"
-                    disabled={!variants.length}
+                    disabled={!variants.length || generating || zipAssetsMutation.isPending}
                     onClick={onDownloadAll}
                     className={[
                       "rounded-md px-3 py-2 text-xs font-medium transition",
-                      variants.length
+                      variants.length && !generating
                         ? "border border-white/10 bg-white/10 text-white/85 hover:bg-white/20"
                         : "cursor-not-allowed border border-white/10 bg-white/5 text-white/50",
                     ].join(" ")}
                   >
-                    Download All
+                    {zipAssetsMutation.isPending ? "Preparing ZIP..." : "Download All"}
                   </button>
                 </div>
 
-                <div className="text-xs text-white/60">
-                  {variants.length ? `${variants.length} variants ready` : "No variants yet"}
+                <div className="min-w-[220px] text-xs">
+                  {generating ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-white/70">{progressOp}</span>
+                        <span className="text-white/50">{progressPct}%</span>
+                      </div>
+                      <div className="mt-1 h-1.5 w-56 overflow-hidden rounded bg-white/10">
+                        <div
+                          className="h-full bg-emerald-400/70 transition-[width] duration-300"
+                          style={{ width: `${progressPct}%` }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-white/60">
+                      {variants.length ? `${variants.length} variants ready` : "No variants yet"}
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -208,6 +322,36 @@ export default function Page() {
                   onClearResults={onClearResults}
                 />
               </div>
+
+              {/* Meta Tags */}
+              {metaHtml ? (
+                <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-white/90">Meta Tags</h3>
+                    <div className="flex items-center gap-2">
+                      {metaFileUrl ? (
+                        <a
+                          href={metaFileUrl}
+                          download="meta-tags.html"
+                          className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[10px] text-white/85 hover:bg-white/20"
+                        >
+                          Download HTML
+                        </a>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard.writeText(metaHtml)}
+                        className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[10px] text-white/85 hover:bg-white/20"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                  <pre className="max-h-72 overflow-auto rounded-md bg-black/30 p-3 text-[11px] leading-5 text-emerald-100">
+                    <code>{metaHtml}</code>
+                  </pre>
+                </section>
+              ) : null}
             </section>
           </div>
         </div>
@@ -233,115 +377,16 @@ function triggerDownload(dataUrl: string, filename: string) {
   a.remove();
 }
 
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-async function renderVariant(params: {
-  img: HTMLImageElement;
-  width: number;
-  height: number;
-  style: OptionSelections["styles"][number];
-  padding: boolean;
-  border: boolean;
-  mime: string;
-}): Promise<string> {
-  const { img, width, height, style, padding, border, mime } = params;
-
-  // Canvas and context
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d")!;
-  // background
-  ctx.fillStyle = "#0b0b13";
-  ctx.fillRect(0, 0, width, height);
-
-  // compute content box (padding as %)
-  const pad = padding ? Math.round(Math.min(width, height) * 0.06) : 0;
-  const contentX = pad;
-  const contentY = pad;
-  const contentW = width - pad * 2;
-  const contentH = height - pad * 2;
-
-  // Style filter
-  switch (style) {
-    case "Vibrant":
-      ctx.filter = "saturate(1.3) contrast(1.1) brightness(1.05)";
-      break;
-    case "Muted":
-      ctx.filter = "saturate(0.8) brightness(0.95) contrast(0.98)";
-      break;
-    case "Mono":
-      ctx.filter = "grayscale(1) contrast(1.1) brightness(1)";
-      break;
+function readableError(err: unknown, fallback: string): string {
+  if (typeof err === "object" && err !== null) {
+    const withMsg = err as { message?: unknown; cause?: unknown };
+    if (typeof withMsg.message === "string" && withMsg.message.trim().length > 0) {
+      return withMsg.message;
+    }
+    const cause = withMsg.cause as { message?: unknown } | undefined;
+    if (cause && typeof cause.message === "string" && cause.message.trim().length > 0) {
+      return cause.message;
+    }
   }
-
-  // draw image fitted into content box preserving aspect ratio, center crop if needed
-  drawFitted(ctx, img, contentX, contentY, contentW, contentH);
-
-  // Reset filter for overlays
-  ctx.filter = "none";
-
-  // Subtle overlay gradient for style flavor
-  const grad = ctx.createLinearGradient(0, 0, width, height);
-  if (style === "Vibrant") {
-    grad.addColorStop(0, "rgba(79,70,229,0.14)");
-    grad.addColorStop(1, "rgba(16,185,129,0.12)");
-  } else if (style === "Muted") {
-    grad.addColorStop(0, "rgba(148,163,184,0.10)");
-    grad.addColorStop(1, "rgba(51,65,85,0.10)");
-  } else {
-    grad.addColorStop(0, "rgba(255,255,255,0.04)");
-    grad.addColorStop(1, "rgba(0,0,0,0.12)");
-  }
-  ctx.fillStyle = grad;
-  ctx.fillRect(contentX, contentY, contentW, contentH);
-
-  // Border
-  if (border) {
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = Math.max(2, Math.round(Math.min(width, height) * 0.006));
-    ctx.strokeRect(contentX + ctx.lineWidth / 2, contentY + ctx.lineWidth / 2, contentW - ctx.lineWidth, contentH - ctx.lineWidth);
-  }
-
-  // Export
-  const quality = mime === "image/jpeg" ? 0.92 : 0.95;
-  return canvas.toDataURL(mime, quality);
-}
-
-function drawFitted(
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  dx: number,
-  dy: number,
-  dWidth: number,
-  dHeight: number,
-) {
-  const sRatio = img.width / img.height;
-  const dRatio = dWidth / dHeight;
-
-  let sx = 0;
-  let sy = 0;
-  let sWidth = img.width;
-  let sHeight = img.height;
-
-  if (sRatio > dRatio) {
-    // Source is wider: crop horizontally
-    sWidth = img.height * dRatio;
-    sx = (img.width - sWidth) / 2;
-  } else if (sRatio < dRatio) {
-    // Source is taller: crop vertically
-    sHeight = img.width / dRatio;
-    sy = (img.height - sHeight) / 2;
-  }
-
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight);
+  return fallback;
 }

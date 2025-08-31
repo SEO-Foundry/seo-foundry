@@ -2,54 +2,77 @@
 
 import { useCallback } from "react";
 
-export type OptionSelections = {
-  sizes: ("1:1" | "4:5" | "9:16")[];
-  styles: ("Vibrant" | "Muted" | "Mono")[];
-  formats: ("PNG" | "JPEG" | "WEBP")[];
-  padding: boolean;
-  border: boolean;
+export type PixelForgeSelections = {
+  generationTypes: ("favicon" | "pwa" | "social" | "seo" | "web" | "all")[];
+  transparent?: boolean;
+
+  // Advanced metadata (reserved for future use by server)
+  appName?: string;
+  description?: string;
+  themeColor?: string;
+  backgroundColor?: string;
+
+  // Output options
+  format?: "png" | "jpeg" | "webp";
+  quality?: number; // 1-100
+  urlPrefix?: string;
 };
 
 type Props = {
-  value: OptionSelections;
-  onChange: (next: OptionSelections) => void;
+  value: PixelForgeSelections;
+  onChange: (next: PixelForgeSelections) => void;
 };
 
-const SIZE_OPTIONS: Array<OptionSelections["sizes"][number]> = ["1:1", "4:5", "9:16"];
-const STYLE_OPTIONS: Array<OptionSelections["styles"][number]> = ["Vibrant", "Muted", "Mono"];
-const FORMAT_OPTIONS: Array<OptionSelections["formats"][number]> = ["PNG", "JPEG", "WEBP"];
+const GENERATION_OPTIONS: Array<PixelForgeSelections["generationTypes"][number]> = [
+  "all",
+  "favicon",
+  "pwa",
+  "social",
+  "seo",
+  "web",
+];
 
 export default function SidebarOptions({ value, onChange }: Props) {
-  const toggle = useCallback(
-    <T extends string>(key: keyof OptionSelections, item: T) => {
-      const current = value[key];
-      if (!Array.isArray(current)) return;
-      const exists = (current as unknown as T[]).includes(item);
-      const nextArr = exists
-        ? (current as unknown as T[]).filter((i) => i !== item)
-        : [...(current as unknown as T[]), item];
-      onChange({ ...value, [key]: nextArr } as OptionSelections);
+  const toggleType = useCallback(
+    (item: PixelForgeSelections["generationTypes"][number]) => {
+      const current = value.generationTypes ?? [];
+      const exists = current.includes(item);
+      const nextArr = exists ? current.filter((i) => i !== item) : [...current, item];
+      onChange({ ...value, generationTypes: nextArr });
     },
     [value, onChange],
   );
 
   const toggleBool = useCallback(
-    (key: keyof OptionSelections) => {
-      const current = value[key] as unknown as boolean;
-      onChange({ ...value, [key]: !current });
+    (key: keyof PixelForgeSelections) => {
+      const cur = Boolean(value[key]);
+      onChange({ ...value, [key]: !cur });
+    },
+    [value, onChange],
+  );
+
+  const setField = useCallback(
+    (key: keyof PixelForgeSelections, v: string | number | undefined) => {
+      onChange({ ...value, [key]: v } as PixelForgeSelections);
     },
     [value, onChange],
   );
 
   const reset = () => {
     onChange({
-      sizes: ["1:1", "4:5", "9:16"],
-      styles: ["Vibrant", "Muted", "Mono"],
-      formats: ["PNG"],
-      padding: true,
-      border: false,
+      generationTypes: ["all"],
+      transparent: false,
+      appName: "",
+      description: "",
+      themeColor: "",
+      backgroundColor: "",
+      format: "png",
+      quality: 90,
+      urlPrefix: "",
     });
   };
+
+  const quality = clampNumber(value.quality ?? 90, 1, 100);
 
   return (
     <aside className="h-full w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] backdrop-blur-md">
@@ -64,49 +87,85 @@ export default function SidebarOptions({ value, onChange }: Props) {
         </button>
       </div>
 
-      <Section title="Output Sizes">
-        <div className="grid grid-cols-2 gap-2">
-          {SIZE_OPTIONS.map((opt) => (
-            <CheckPill
-              key={opt}
-              label={opt}
-              checked={value.sizes.includes(opt)}
-              onChange={() => toggle("sizes", opt)}
-            />
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Style">
+      <Section title="Generate">
         <div className="grid grid-cols-3 gap-2">
-          {STYLE_OPTIONS.map((opt) => (
+          {GENERATION_OPTIONS.map((opt) => (
             <CheckPill
               key={opt}
-              label={opt}
-              checked={value.styles.includes(opt)}
-              onChange={() => toggle("styles", opt)}
+              label={labelFor(opt)}
+              checked={(value.generationTypes ?? []).includes(opt)}
+              onChange={() => toggleType(opt)}
             />
           ))}
         </div>
-      </Section>
 
-      <Section title="Format">
-        <div className="grid grid-cols-3 gap-2">
-          {FORMAT_OPTIONS.map((opt) => (
-            <CheckPill
-              key={opt}
-              label={opt}
-              checked={value.formats.includes(opt)}
-              onChange={() => toggle("formats", opt)}
-            />
-          ))}
+        <div className="mt-3 grid gap-2">
+          <Toggle label="Transparent (post-process)" checked={Boolean(value.transparent)} onChange={() => toggleBool("transparent")} />
         </div>
       </Section>
 
-      <Section title="Presentation">
+      <Section title="Metadata">
+        <div className="space-y-2">
+          <InputText
+            label="App Name"
+            placeholder="My App"
+            value={value.appName ?? ""}
+            onChange={(v) => setField("appName", v)}
+          />
+          <InputText
+            label="Description"
+            placeholder="Short description"
+            value={value.description ?? ""}
+            onChange={(v) => setField("description", v)}
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <InputText
+              label="Theme Color"
+              placeholder="#0ea5e9"
+              value={value.themeColor ?? ""}
+              onChange={(v) => setField("themeColor", v)}
+            />
+            <InputText
+              label="Background"
+              placeholder="#0b0b13"
+              value={value.backgroundColor ?? ""}
+              onChange={(v) => setField("backgroundColor", v)}
+            />
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Output">
         <div className="grid grid-cols-2 gap-2">
-          <Toggle label="Padding" checked={value.padding} onChange={() => toggleBool("padding")} />
-          <Toggle label="Border" checked={value.border} onChange={() => toggleBool("border")} />
+          <Select
+            label="Format"
+            value={value.format ?? "png"}
+            options={[
+              { value: "png", label: "PNG" },
+              { value: "jpeg", label: "JPEG" },
+              { value: "webp", label: "WebP" },
+            ]}
+            onChange={(v) => setField("format", v as PixelForgeSelections["format"])}
+          />
+          <div>
+            <label className="mb-1 block text-[11px] text-white/60">Quality: {quality}</label>
+            <input
+              type="range"
+              min={1}
+              max={100}
+              value={quality}
+              onChange={(e) => setField("quality", Number(e.target.value))}
+              className="w-full accent-emerald-400"
+            />
+          </div>
+        </div>
+        <div className="mt-2">
+          <InputText
+            label="URL Prefix"
+            placeholder="/api/pixel-forge/files/:session/generated/"
+            value={value.urlPrefix ?? ""}
+            onChange={(v) => setField("urlPrefix", v)}
+          />
         </div>
       </Section>
 
@@ -163,4 +222,67 @@ function Toggle(props: { label: string; checked: boolean; onChange: () => void }
       <input type="checkbox" className="sr-only" checked={props.checked} onChange={props.onChange} />
     </label>
   );
+}
+
+function InputText(props: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] text-white/60">{props.label}</span>
+      <input
+        type="text"
+        value={props.value}
+        placeholder={props.placeholder}
+        onChange={(e) => props.onChange(e.target.value)}
+        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white/90 placeholder:text-white/40 outline-none focus:border-emerald-400/40"
+      />
+    </label>
+  );
+}
+
+function Select(props: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] text-white/60">{props.label}</span>
+      <select
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white/90 outline-none focus:border-emerald-400/40"
+      >
+        {props.options.map((opt) => (
+          <option key={opt.value} value={opt.value} className="bg-[#0b0b13]">
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function labelFor(k: PixelForgeSelections["generationTypes"][number]): string {
+  switch (k) {
+    case "all":
+      return "All";
+    case "favicon":
+      return "Favicon";
+    case "pwa":
+      return "PWA";
+    case "social":
+      return "Social";
+    case "seo":
+      return "SEO";
+    case "web":
+      return "Web";
+    default:
+      return k;
+  }
+}
+
+function clampNumber(n: number, min: number, max: number): number {
+  if (Number.isNaN(n)) return min;
+  return Math.min(max, Math.max(min, Math.round(n)));
 }

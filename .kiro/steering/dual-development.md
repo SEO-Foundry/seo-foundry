@@ -89,3 +89,43 @@ ls -la packages/pixel-forge       # Should exist and contain pixel-forge repo
 3. **Server-side integration**: Only use tools in Node.js contexts
 4. **Multi-tool architecture**: Each tool follows the same integration pattern
 5. **Temporary setup**: Local clones will be replaced with npm dependencies when tools stabilize
+
+---
+
+## Pixel Forge Integration Notes
+
+- Server-only usage. Pixel Forge must be invoked on the server. Calls are routed through:
+  - tRPC router: [pixelForgeRouter](src/server/api/routers/pixel-forge.ts:57)
+  - File-serving route: [GET/HEAD handler](src/app/api/pixel-forge/files/[sessionId]/[...filePath]/route.ts:1) with Node runtime
+- Workspace linking. The dependency is declared as "workspace:*" and resolved to the local clone under `packages/pixel-forge`. Do not modify tool code from this repo; iterate in the tool repository and rebuild/watch there.
+- Safety and abuse mitigation (enforced in router):
+  - Rate limits and per-session concurrency locks: [security utils](src/server/lib/security.ts:15)
+  - Path confinement and traversal protection live in the file route: [route.ts](src/app/api/pixel-forge/files/[sessionId]/[...filePath]/route.ts:1)
+  - Safe urlPrefix guard ensures returned URLs are always served by our own route
+- Engine detection. The integration prefers ImageMagick and falls back to Jimp:
+  - Engine selection: [ensureImageEngine()](src/server/lib/pixel-forge/deps.ts:10)
+
+### Recommended Dev Commands
+
+- Run both workspaces during development:
+  - Tool: pnpm --filter pixel-forge dev
+  - App: pnpm dev
+- Validate API and security behavior via tests:
+  - All tests: pnpm test
+  - Watch: pnpm test:watch
+- Type checks:
+  - App: pnpm typecheck
+  - Tests project: tsc -p tests/tsconfig.json --noEmit
+
+### Testing Scope (for dual-dev sanity)
+
+- Router API and security behavior are covered by:
+  - [router tests](tests/pixel-forge/router.test.ts:1) — sessions, uploads, generation, ZIP, progress limits
+  - [security tests](tests/pixel-forge/security.test.ts:1) — fixed-window limiter, locks
+- Vitest config and alias resolution:
+  - [vitest.config.defineConfig()](vitest.config.ts:4)
+  - [tests TS config](tests/tsconfig.json:1)
+- Additional documentation:
+  - [Pixel Forge Integration](docs/pixel-forge-integration.md:1)
+  - [Security](docs/security.md:1)
+  - [Testing](docs/testing.md:1)
