@@ -17,7 +17,7 @@ Key files and entry points:
 - Server API root: [appRouter](src/server/api/root.ts:9) and type [AppRouter](src/server/api/root.ts:14)
 - tRPC plumbing: [createTRPCContext()](src/server/api/trpc.ts:27), [createTRPCRouter](src/server/api/trpc.ts:74), [publicProcedure](src/server/api/trpc.ts:106)
 - Example router and procedures: [postRouter](src/server/api/routers/post.ts:5), [hello](src/server/api/routers/post.ts:6), [create](src/server/api/routers/post.ts:14), [getLatest](src/server/api/routers/post.ts:24)
-- React tRPC client/provider: [api](src/trpc/react.tsx:25), [TRPCReactProvider()](src/trpc/react.tsx:41), [getBaseUrl()](src/trpc/react.tsx:74)
+- React tRPC client/provider: [api export](src/trpc/react.ts), [TRPCReactProvider() + getBaseUrl()](src/trpc/react-client.tsx)
 - Prisma schema: [prisma/schema.prisma](prisma/schema.prisma) (model [Post](prisma/schema.prisma:13))
 - Environment validation: [src/env.js](src/env.js)
 - Database helper: [src/server/db.ts](src/server/db.ts)
@@ -145,8 +145,8 @@ Server:
 - HTTP handler bound in App Router: [src/app/api/trpc/[trpc]/route.ts](src/app/api/trpc/%5Btrpc%5D/route.ts)
 
 Client:
-- React Query + tRPC client/provider: [TRPCReactProvider()](src/trpc/react.tsx:41), client instance [api](src/trpc/react.tsx:25)
-- Base URL resolution: [getBaseUrl()](src/trpc/react.tsx:74) (uses `window.location`, `VERCEL_URL`, or `localhost:PORT`)
+- React Query + tRPC client/provider: [TRPCReactProvider()](src/trpc/react-client.tsx), client instance [api](src/trpc/react.ts)
+- Base URL resolution: [getBaseUrl()](src/trpc/react-client.tsx) (uses `window.location` on client or `NEXT_PUBLIC_APP_URL`/default for RSC/SSR)
 - Example server component usage of tRPC RSC helpers: [src/app/page.tsx](src/app/page.tsx)
 - Example hydrated component showing the latest post: [src/app/_components/post.tsx](src/app/_components/post.tsx)
 
@@ -253,3 +253,44 @@ Notes:
 
 Full workflow and removal steps are documented at:
 - [docs/dual-development.md](docs/dual-development.md)
+
+
+## 14) Pixel Forge integration (server and UI)
+
+A full integration guide with data flow and operational details is provided here:
+- Pixel Forge Integration Guide: [docs/pixel-forge-integration.md](docs/pixel-forge-integration.md)
+
+Quick pointers:
+- UI route: open http://localhost:3000/pixel-forge
+- Server router: [pixel-forgeRouter](src/server/api/routers/pixel-forge.ts:51)
+  - newSession, uploadImage, generateAssets, getGenerationProgress, zipAssets, cleanupSession, cleanupExpired
+- Session storage utilities: [session.ts](src/server/lib/pixel-forge/session.ts:1)
+- Engine detection (ImageMagick/Jimp): [deps.ts](src/server/lib/pixel-forge/deps.ts:1)
+- Client provider: [TRPCReactProvider()](src/trpc/react-client.tsx:18), [api](src/trpc/react.ts:1)
+
+Recommended toolchain for best results:
+- ImageMagick installed on the host to enable the `magick` engine
+  - macOS: `brew install imagemagick`
+  - Debian/Ubuntu: `apt-get install imagemagick`
+  - If unavailable, the system falls back to Jimp, with some quality/feature tradeoffs.
+
+
+## 15) Security & production notes
+
+A security-focused overview of hardening and abuse prevention is provided here:
+- Security and Abuse-Prevention Design: [docs/security.md](docs/security.md)
+
+Highlights:
+- Rate limiting by endpoint (keyed by IP and session), concurrency locks per session
+- Path normalization and session-root confinement for all file operations
+- Safe urlPrefix enforcement for generated asset URLs
+- File-serving route with ETag/Last-Modified, conditional GET (304), `nosniff`, and ZIP attachment headers
+- Opportunistic TTL cleanup for expired sessions, plus a manual cleanup API
+- Client error/info alerts and structured TRPC errors with actionable guidance
+
+Production recommendations:
+- Use a shared store (e.g., Redis) for distributed rate limiting and locks
+- Move temporary session files to object storage (S3/R2), serve via signed URLs or secure proxy
+- Enforce additional limits at the edge (CDN/WAF), tune caching and headers at the proxy layer
+- Add observability/metrics for generation runtimes, error rates, and rate-limit hit counts
+
