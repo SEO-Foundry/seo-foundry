@@ -9,9 +9,10 @@ export default defineConfig({
       "tests/**/*.test.ts",
       "tests/**/*.test.tsx",
       "tests/**/*.spec.ts",
-      "tests/**/*.spec.tsx",
-      "tests/**/*.ts",
-      "tests/**/*.tsx",
+      "tests/**/*.spec.tsx"
+    ],
+    exclude: [
+      "**/*.d.ts"
     ],
     coverage: {
       provider: "v8",

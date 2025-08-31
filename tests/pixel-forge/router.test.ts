@@ -178,7 +178,7 @@ describe("pixel-forge router", () => {
     const ctx = await createTRPCContext({ headers: headersWithIP("203.0.113.15") });
     const caller = appRouter.createCaller(ctx);
 
-    const sess = await createSession(1); // expires almost immediately
+    await createSession(1); // expires almost immediately
     // Wait a moment, then cleanup
     await new Promise((r) => setTimeout(r, 5));
     const out = await caller.pixelForge.cleanupExpired();
