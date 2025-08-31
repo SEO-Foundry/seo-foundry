@@ -253,12 +253,12 @@ export async function cleanupSession(sessionId: string): Promise<void> {
     console.warn(`[pixel-forge] cleanup warning for ${sessionId}:`, err);
   }
 }
-
+ 
 export async function cleanupExpiredSessions(): Promise<{ removed: string[] }> {
   const root = getTempRoot();
   const removed: string[] = [];
   if (!(await pathExists(root))) return { removed };
-
+ 
   const entries = await fs.readdir(root, { withFileTypes: true });
   for (const e of entries) {
     if (!e.isDirectory()) continue;
@@ -277,4 +277,28 @@ export async function cleanupExpiredSessions(): Promise<{ removed: string[] }> {
     }
   }
   return { removed };
+}
+ 
+// Opportunistic TTL cleanup guard to avoid running too often per server instance
+let __pf_lastCleanupAt = 0;
+/**
+ * Run TTL cleanup at most once per minIntervalMs for this server instance.
+ * Useful in serverless-ish environments where a real cron is not available.
+ */
+export async function maybeCleanupExpiredSessions(minIntervalMs = 60 * 60 * 1000): Promise<{
+  ran: boolean;
+  removed: string[] | null;
+}> {
+  const now = Date.now();
+  if (now - __pf_lastCleanupAt < minIntervalMs) {
+    return { ran: false, removed: null };
+  }
+  __pf_lastCleanupAt = now;
+  try {
+    const res = await cleanupExpiredSessions();
+    return { ran: true, removed: res.removed };
+  } catch (err) {
+    console.warn("[pixel-forge] opportunistic TTL cleanup failed:", err);
+    return { ran: true, removed: null };
+  }
 }

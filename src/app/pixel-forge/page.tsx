@@ -51,6 +51,8 @@ export default function Page() {
   const [storedPath, setStoredPath] = useState<string | null>(null);
   const [metaHtml, setMetaHtml] = useState<string | null>(null);
   const [metaFileUrl, setMetaFileUrl] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
 
   const uploadImage = api.pixelForge.uploadImage.useMutation();
   const cleanupSession = api.pixelForge.cleanupSession.useMutation();
@@ -75,6 +77,7 @@ const progressOp = progressData?.currentOperation ?? "Working...";
 
   const onUpload = useCallback(async (file: File, dataUrl: string) => {
     try {
+      setErrorMsg(null);
       const base64 = dataUrl.split(",")[1] ?? "";
       const res = await uploadImage.mutateAsync({
         fileName: file.name,
@@ -88,6 +91,7 @@ const progressOp = progressData?.currentOperation ?? "Working...";
       setVariants([]);
     } catch (err) {
       console.error("[pixel-forge] upload failed", err);
+      setErrorMsg(readableError(err, "Upload failed. Please check file type and size."));
     }
   }, [uploadImage, sessionId]);
 
@@ -105,6 +109,8 @@ const progressOp = progressData?.currentOperation ?? "Working...";
       setVariants([]);
       setMetaHtml(null);
       setMetaFileUrl(null);
+      setErrorMsg(null);
+      setInfoMsg(null);
     }
   }, [sessionId, cleanupSession]);
 
@@ -116,6 +122,8 @@ const progressOp = progressData?.currentOperation ?? "Working...";
     if (!sessionId || !storedPath) return;
     setGenerating(true);
     try {
+      setErrorMsg(null);
+      setInfoMsg(null);
       const res: GenRes = await generateAssetsMutation.mutateAsync({
         sessionId,
         imagePath: storedPath,
@@ -153,8 +161,15 @@ const progressOp = progressData?.currentOperation ?? "Working...";
       // Capture meta tags for display section
       setMetaHtml(res.metaTags?.html ?? null);
       setMetaFileUrl(res.metaTags?.fileUrl ?? null);
+      // Engine guidance (e.g., ImageMagick recommendation)
+      const engineInfo = (res as unknown as { engine?: string; engineNote?: string });
+      if (engineInfo.engine && engineInfo.engine !== "magick") {
+        const note = engineInfo.engineNote ?? "Install ImageMagick for best quality (brew install imagemagick).";
+        setInfoMsg(`Using ${engineInfo.engine}. ${note}`);
+      }
     } catch (err) {
       console.error("[pixel-forge] generation failed", err);
+      setErrorMsg(readableError(err, "Generation failed. Please try again."));
     } finally {
       setGenerating(false);
     }
@@ -180,12 +195,14 @@ const progressOp = progressData?.currentOperation ?? "Working...";
   const onDownloadAll = useCallback(async () => {
     if (!sessionId) return;
     try {
+      setErrorMsg(null);
       const res = await zipAssetsMutation.mutateAsync({ sessionId });
       if (res.zipUrl) {
         triggerDownload(res.zipUrl, "pixel-forge-assets.zip");
       }
     } catch (err) {
       console.error("[pixel-forge] zip download failed", err);
+      setErrorMsg(readableError(err, "ZIP creation failed. Falling back to individual downloads."));
       // Fallback: sequential downloads
       for (const v of variants) {
         await delay(80);
@@ -228,6 +245,17 @@ const progressOp = progressData?.currentOperation ?? "Working...";
           {/* Canvas */}
           <div className="col-span-12 md:col-span-8 lg:col-span-9">
             <section className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] backdrop-blur">
+              {/* Alerts */}
+              {errorMsg ? (
+                <div className="mb-3 rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                  {errorMsg}
+                </div>
+              ) : null}
+              {infoMsg ? (
+                <div className="mb-3 rounded-md border border-amber-400/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                  {infoMsg}
+                </div>
+              ) : null}
               {/* Upload */}
               <UploadArea previewUrl={sourceUrl ?? null} onUpload={onUpload} onClear={onClearUpload} />
 
@@ -347,4 +375,18 @@ function triggerDownload(dataUrl: string, filename: string) {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+function readableError(err: unknown, fallback: string): string {
+  if (typeof err === "object" && err !== null) {
+    const withMsg = err as { message?: unknown; cause?: unknown };
+    if (typeof withMsg.message === "string" && withMsg.message.trim().length > 0) {
+      return withMsg.message;
+    }
+    const cause = withMsg.cause as { message?: unknown } | undefined;
+    if (cause && typeof cause.message === "string" && cause.message.trim().length > 0) {
+      return cause.message;
+    }
+  }
+  return fallback;
 }

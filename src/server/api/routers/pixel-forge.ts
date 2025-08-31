@@ -12,6 +12,7 @@ import {
   updateMeta as updatePFMeta,
   isAllowedMime,
   cleanupExpiredSessions as cleanupExpiredPF,
+  maybeCleanupExpiredSessions,
 } from "@/server/lib/pixel-forge/session";
 import { ensureImageEngine } from "@/server/lib/pixel-forge/deps";
 import { generateAssets as pfGenerateAssets } from "pixel-forge";
@@ -50,6 +51,7 @@ function toFileUrl(sessionId: string, sessionRoot: string, absoluteFilePath: str
 export const pixelForgeRouter = createTRPCRouter({
   // Create a new session explicitly. The upload procedure will also create one implicitly if omitted.
   newSession: publicProcedure.mutation(async () => {
+    void (await maybeCleanupExpiredSessions());
     const sess = await createPFSess();
     return { sessionId: sess.id };
   }),
@@ -65,28 +67,39 @@ export const pixelForgeRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input }) => {
+      void (await maybeCleanupExpiredSessions());
       // Ensure or create session
       const sessionId = input.sessionId ?? (await createPFSess()).id;
       const sessPaths = await ensurePFSess(sessionId);
 
       // Persist upload
-      const { savedPath, size, originalName } = await saveBase64Upload({
-        sessionId,
-        fileName: input.fileName,
-        base64Data: input.fileData,
-        mimeType: input.mimeType,
-      });
+      try {
+        const { savedPath, size, originalName } = await saveBase64Upload({
+          sessionId,
+          fileName: input.fileName,
+          base64Data: input.fileData,
+          mimeType: input.mimeType,
+          maxBytes: 10 * 1024 * 1024, // 10MB cap
+        });
 
-      // Build preview URL (served by future file route handler)
-      const previewUrl = toFileUrl(sessionId, sessPaths.root, savedPath);
+        // Build preview URL (served by route handler)
+        const previewUrl = toFileUrl(sessionId, sessPaths.root, savedPath);
 
-      return {
-        sessionId,
-        originalName,
-        size,
-        storedPath: path.relative(sessPaths.root, savedPath),
-        previewUrl,
-      };
+        return {
+          sessionId,
+          originalName,
+          size,
+          storedPath: path.relative(sessPaths.root, savedPath),
+          previewUrl,
+        };
+      } catch (err) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message:
+            err instanceof Error ? err.message : "Upload failed due to invalid file or size limit",
+          cause: err as Error,
+        });
+      }
     }),
 
   // Generate assets with pixel-forge (server-side)
@@ -114,6 +127,7 @@ export const pixelForgeRouter = createTRPCRouter({
       }),
     )
     .mutation(async ({ input }) => {
+      void (await maybeCleanupExpiredSessions());
       const { sessionId } = input;
       const sess = await ensurePFSess(sessionId);
 
@@ -173,7 +187,7 @@ export const pixelForgeRouter = createTRPCRouter({
         await updatePFMeta(sessionId, { status: "error" });
         throw new TRPCError({
           code: "INTERNAL_SERVER_ERROR",
-          message: "Pixel Forge generation failed",
+          message: `Pixel Forge generation failed. Engine: ${engineInfo.engine}. ${engineInfo.note ?? "If ImageMagick is not installed, install it (e.g., 'brew install imagemagick') for best quality."}`,
           cause: err as Error,
         });
       }
@@ -270,26 +284,35 @@ export const pixelForgeRouter = createTRPCRouter({
   zipAssets: publicProcedure
     .input(z.object({ sessionId: z.string().uuid() }))
     .mutation(async ({ input }) => {
-      const sess = await ensurePFSess(input.sessionId);
-      const zipPath = path.join(sess.root, "assets.zip");
+      void (await maybeCleanupExpiredSessions());
+      try {
+        const sess = await ensurePFSess(input.sessionId);
+        const zipPath = path.join(sess.root, "assets.zip");
 
-      // Build ZIP archive
-      await new Promise<void>((resolve, reject) => {
-        const output = createWriteStream(zipPath);
-        const archive: Archiver = archiver("zip", { zlib: { level: 9 } });
+        // Build ZIP archive
+        await new Promise<void>((resolve, reject) => {
+          const output = createWriteStream(zipPath);
+          const archive: Archiver = archiver("zip", { zlib: { level: 9 } });
 
-        output.on("close", resolve);
-        archive.on("error", reject);
+          output.on("close", resolve);
+          archive.on("error", reject);
 
-        archive.pipe(output);
-        // Add generated directory contents at root of archive
-        archive.directory(sess.generatedDir, false);
-        void archive.finalize();
-      });
+          archive.pipe(output);
+          // Add generated directory contents at root of archive
+          archive.directory(sess.generatedDir, false);
+          void archive.finalize();
+        });
 
-      const stat = await fsp.stat(zipPath).catch(() => null);
-      const zipUrl = toFileUrl(input.sessionId, sess.root, zipPath);
-      return { zipUrl, size: stat?.size ?? 0 };
+        const stat = await fsp.stat(zipPath).catch(() => null);
+        const zipUrl = toFileUrl(input.sessionId, sess.root, zipPath);
+        return { zipUrl, size: stat?.size ?? 0 };
+      } catch (err) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create ZIP archive",
+          cause: err as Error,
+        });
+      }
     }),
 
   // Cleanup expired sessions (TTL-based)
