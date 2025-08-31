@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import SidebarOptions, { type OptionSelections } from "@/app/_components/SidebarOptions";
+import SidebarOptions, { type PixelForgeSelections } from "@/app/_components/SidebarOptions";
 import UploadArea from "@/app/_components/UploadArea";
 import ResultGrid from "@/app/_components/ResultGrid";
+import { api } from "@/trpc/react";
 
 type VariantItem = {
   id: string;
@@ -16,101 +17,137 @@ type VariantItem = {
   };
 };
 
-const DEFAULT_SELECTIONS: OptionSelections = {
-  sizes: ["1:1", "4:5", "9:16"],
-  styles: ["Vibrant", "Muted", "Mono"],
-  formats: ["PNG"],
-  padding: true,
-  border: false,
+type ServerAsset = {
+  fileName: string;
+  category: string;
+  downloadUrl: string;
+  previewUrl?: string;
 };
 
-const SIZE_TO_RATIO: Record<OptionSelections["sizes"][number], number> = {
-  "1:1": 1 / 1,
-  "4:5": 4 / 5, // width / height
-  "9:16": 9 / 16,
+const DEFAULT_SELECTIONS: PixelForgeSelections = {
+  generationTypes: ["all"],
+  transparent: false,
+  appName: "",
+  description: "",
+  themeColor: "",
+  backgroundColor: "",
+  format: "png",
+  quality: 90,
+  urlPrefix: "",
 };
 
-const FORMAT_TO_MIME: Record<OptionSelections["formats"][number], string> = {
-  PNG: "image/png",
-  JPEG: "image/jpeg",
-  WEBP: "image/webp",
-};
+
 
 export default function Page() {
-  const [selections, setSelections] = useState<OptionSelections>(DEFAULT_SELECTIONS);
+  const [selections, setSelections] = useState<PixelForgeSelections>(DEFAULT_SELECTIONS);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
-  const [sourceName, setSourceName] = useState<string>("image");
   const [generating, setGenerating] = useState(false);
   const [variants, setVariants] = useState<VariantItem[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [storedPath, setStoredPath] = useState<string | null>(null);
+
+  const uploadImage = api.pixelForge.uploadImage.useMutation();
+  const cleanupSession = api.pixelForge.cleanupSession.useMutation();
+  const generateAssetsMutation = api.pixelForge.generateAssets.useMutation();
 
   const canGenerate = useMemo(() => {
-    return !!sourceUrl && selections.sizes.length && selections.styles.length && selections.formats.length;
-  }, [sourceUrl, selections]);
+    return !!sessionId && !!storedPath;
+  }, [sessionId, storedPath]);
 
-  const onUpload = useCallback((file: File, url: string) => {
-    setSourceUrl(url);
-    setSourceName(file.name?.replace(/\.[a-zA-Z0-9]+$/, "") || "image");
-    setVariants([]);
-  }, []);
+  const onUpload = useCallback(async (file: File, dataUrl: string) => {
+    try {
+      const base64 = dataUrl.split(",")[1] ?? "";
+      const res = await uploadImage.mutateAsync({
+        fileName: file.name,
+        fileData: base64,
+        mimeType: file.type || "image/png",
+        sessionId: sessionId ?? undefined,
+      });
+      setSessionId(res.sessionId);
+      setStoredPath(res.storedPath);
+      setSourceUrl(res.previewUrl);
+      setVariants([]);
+    } catch (err) {
+      console.error("[pixel-forge] upload failed", err);
+    }
+  }, [uploadImage, sessionId]);
 
-  const onClearUpload = useCallback(() => {
-    setSourceUrl(null);
-    setVariants([]);
-  }, []);
+  const onClearUpload = useCallback(async () => {
+    try {
+      if (sessionId) {
+        await cleanupSession.mutateAsync({ sessionId });
+      }
+    } catch (err) {
+      console.warn("[pixel-forge] cleanup warning", err);
+    } finally {
+      setSourceUrl(null);
+      setSessionId(null);
+      setStoredPath(null);
+      setVariants([]);
+    }
+  }, [sessionId, cleanupSession]);
 
   const onClearResults = useCallback(() => {
     setVariants([]);
   }, []);
 
   const generate = useCallback(async () => {
-    if (!sourceUrl) return;
+    if (!sessionId || !storedPath) return;
     setGenerating(true);
-
     try {
-      const img = await loadImage(sourceUrl);
+      const res = (await generateAssetsMutation.mutateAsync({
+        sessionId,
+        imagePath: storedPath,
+        options: {
+          generationTypes:
+            (selections.generationTypes?.length ?? 0) > 0 ? selections.generationTypes : ["all"],
+          transparent: Boolean(selections.transparent),
+          appName: selections.appName ?? undefined,
+          description: selections.description ?? undefined,
+          themeColor: selections.themeColor ?? undefined,
+          backgroundColor: selections.backgroundColor ?? undefined,
+          format: selections.format,
+          quality: selections.quality,
+          urlPrefix: selections.urlPrefix ?? undefined,
+        },
+      })) as { assets: ServerAsset[] };
 
-      // Base render width to keep file sizes sane for a mock. Height derived by ratio.
-      const BASE_WIDTH = 896;
-
-      const newVariants: VariantItem[] = [];
-
-      for (const size of selections.sizes) {
-        const ratio = SIZE_TO_RATIO[size];
-        const width = BASE_WIDTH;
-        const height = Math.round(width / ratio);
-
-        for (const style of selections.styles) {
-          for (const format of selections.formats) {
-            const url = await renderVariant({
-              img,
-              width,
-              height,
-              style,
-              padding: selections.padding,
-              border: selections.border,
-              mime: FORMAT_TO_MIME[format],
-            });
-
-            const suffixSize = size.replace(":", "x");
-            const suffixStyle = style.toLowerCase();
-            const ext = format.toLowerCase();
-            const filename = `${sourceName}_${suffixSize}_${suffixStyle}.${ext}`;
-
-            newVariants.push({
-              id: `${size}-${style}-${format}-${Math.random().toString(36).slice(2, 8)}`,
-              url,
-              filename,
-              meta: { size, style, format },
-            });
-          }
-        }
-      }
-
+      const newVariants: VariantItem[] = res.assets.map((a: ServerAsset) => {
+        const ext = a.fileName.split(".").pop()?.toUpperCase() ?? "PNG";
+        const re = /(\d{2,4})x(\d{2,4})/;
+        const dimsMatch = re.exec(a.fileName);
+        const dimStr = dimsMatch ? `${dimsMatch[1]}x${dimsMatch[2]}` : "";
+        return {
+          id: `${a.category}-${a.fileName}`,
+          url: a.previewUrl ?? a.downloadUrl,
+          filename: a.fileName,
+          meta: {
+            size: dimStr || a.category,
+            style: a.category,
+            format: ext,
+          },
+        };
+      });
       setVariants(newVariants);
+    } catch (err) {
+      console.error("[pixel-forge] generation failed", err);
     } finally {
       setGenerating(false);
     }
-  }, [sourceUrl, selections, sourceName]);
+  }, [
+    sessionId,
+    storedPath,
+    generateAssetsMutation,
+    selections.generationTypes,
+    selections.transparent,
+    selections.appName,
+    selections.description,
+    selections.themeColor,
+    selections.backgroundColor,
+    selections.format,
+    selections.quality,
+    selections.urlPrefix,
+  ]);
 
   const onDownloadOne = useCallback((v: VariantItem) => {
     triggerDownload(v.url, v.filename);
@@ -231,117 +268,4 @@ function triggerDownload(dataUrl: string, filename: string) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-}
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-async function renderVariant(params: {
-  img: HTMLImageElement;
-  width: number;
-  height: number;
-  style: OptionSelections["styles"][number];
-  padding: boolean;
-  border: boolean;
-  mime: string;
-}): Promise<string> {
-  const { img, width, height, style, padding, border, mime } = params;
-
-  // Canvas and context
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d")!;
-  // background
-  ctx.fillStyle = "#0b0b13";
-  ctx.fillRect(0, 0, width, height);
-
-  // compute content box (padding as %)
-  const pad = padding ? Math.round(Math.min(width, height) * 0.06) : 0;
-  const contentX = pad;
-  const contentY = pad;
-  const contentW = width - pad * 2;
-  const contentH = height - pad * 2;
-
-  // Style filter
-  switch (style) {
-    case "Vibrant":
-      ctx.filter = "saturate(1.3) contrast(1.1) brightness(1.05)";
-      break;
-    case "Muted":
-      ctx.filter = "saturate(0.8) brightness(0.95) contrast(0.98)";
-      break;
-    case "Mono":
-      ctx.filter = "grayscale(1) contrast(1.1) brightness(1)";
-      break;
-  }
-
-  // draw image fitted into content box preserving aspect ratio, center crop if needed
-  drawFitted(ctx, img, contentX, contentY, contentW, contentH);
-
-  // Reset filter for overlays
-  ctx.filter = "none";
-
-  // Subtle overlay gradient for style flavor
-  const grad = ctx.createLinearGradient(0, 0, width, height);
-  if (style === "Vibrant") {
-    grad.addColorStop(0, "rgba(79,70,229,0.14)");
-    grad.addColorStop(1, "rgba(16,185,129,0.12)");
-  } else if (style === "Muted") {
-    grad.addColorStop(0, "rgba(148,163,184,0.10)");
-    grad.addColorStop(1, "rgba(51,65,85,0.10)");
-  } else {
-    grad.addColorStop(0, "rgba(255,255,255,0.04)");
-    grad.addColorStop(1, "rgba(0,0,0,0.12)");
-  }
-  ctx.fillStyle = grad;
-  ctx.fillRect(contentX, contentY, contentW, contentH);
-
-  // Border
-  if (border) {
-    ctx.strokeStyle = "rgba(255,255,255,0.25)";
-    ctx.lineWidth = Math.max(2, Math.round(Math.min(width, height) * 0.006));
-    ctx.strokeRect(contentX + ctx.lineWidth / 2, contentY + ctx.lineWidth / 2, contentW - ctx.lineWidth, contentH - ctx.lineWidth);
-  }
-
-  // Export
-  const quality = mime === "image/jpeg" ? 0.92 : 0.95;
-  return canvas.toDataURL(mime, quality);
-}
-
-function drawFitted(
-  ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
-  dx: number,
-  dy: number,
-  dWidth: number,
-  dHeight: number,
-) {
-  const sRatio = img.width / img.height;
-  const dRatio = dWidth / dHeight;
-
-  let sx = 0;
-  let sy = 0;
-  let sWidth = img.width;
-  let sHeight = img.height;
-
-  if (sRatio > dRatio) {
-    // Source is wider: crop horizontally
-    sWidth = img.height * dRatio;
-    sx = (img.width - sWidth) / 2;
-  } else if (sRatio < dRatio) {
-    // Source is taller: crop vertically
-    sHeight = img.width / dRatio;
-    sy = (img.height - sHeight) / 2;
-  }
-
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dWidth, dHeight);
 }
