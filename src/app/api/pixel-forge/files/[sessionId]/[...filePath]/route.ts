@@ -2,8 +2,19 @@ import { promises as fs } from "fs";
 import path from "path";
 import type { NextRequest } from "next/server";
 import { ensureSession } from "@/server/lib/pixel-forge/session";
+import { lookup as mimeLookup } from "mime-types";
 
 export const runtime = "nodejs";
+
+function detectContentType(filePath: string): string {
+  const ct = mimeLookup(filePath);
+  return (typeof ct === "string" && ct.length > 0 ? ct : "application/octet-stream") as string;
+}
+
+function makeETag(size: number, mtimeMs: number): string {
+  // Weak ETag: size-mtime fingerprint
+  return `W/"${size.toString(16)}-${Math.floor(mtimeMs).toString(16)}"`;
+}
 
 function contentTypeFor(ext: string): string {
   switch (ext.toLowerCase()) {
@@ -62,13 +73,27 @@ export async function GET(
       return new Response("Not found", { status: 404 });
     }
 
-    const data = await fs.readFile(normalized);
-    const ext = path.extname(normalized);
     const headers = new Headers();
-    headers.set("Content-Type", contentTypeFor(ext));
-    headers.set("Content-Length", String(data.byteLength));
+    // Conditional GET support
+    const etag = makeETag(stat.size, stat.mtimeMs);
+    const ifNoneMatch = _req.headers.get("if-none-match");
+    headers.set("ETag", etag);
+    headers.set("Last-Modified", new Date(stat.mtimeMs).toUTCString());
     // Allow preview in browser by default; clients can still force download via link attributes
     headers.set("Cache-Control", "private, max-age=3600");
+    headers.set("X-Content-Type-Options", "nosniff");
+
+    const ct = detectContentType(normalized);
+    headers.set("Content-Type", ct);
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return new Response(null, { status: 304, headers });
+    }
+
+    const data = await fs.readFile(normalized);
+    headers.set("Content-Length", String(data.byteLength));
+    if (ct === "application/zip") {
+      headers.set("Content-Disposition", `attachment; filename="${path.basename(normalized)}"`);
+    }
 
     // Buffer is not typed as BodyInit in TS; wrap as Uint8Array for Response
     const body = new Uint8Array(data);

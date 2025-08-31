@@ -21,6 +21,12 @@ import type { Archiver } from "archiver";
 import { createWriteStream } from "fs";
 import { promises as fsp } from "fs";
 import { imageSize } from "image-size";
+import {
+  enforceFixedWindowLimit,
+  limiterKey,
+  acquireLock,
+  releaseLock,
+} from "@/server/lib/security";
 
 // Minimal result type from pixel-forge programmatic API
 type PixelForgeResult = {
@@ -50,7 +56,14 @@ function toFileUrl(sessionId: string, sessionRoot: string, absoluteFilePath: str
 
 export const pixelForgeRouter = createTRPCRouter({
   // Create a new session explicitly. The upload procedure will also create one implicitly if omitted.
-  newSession: publicProcedure.mutation(async () => {
+  newSession: publicProcedure.mutation(async ({ ctx }) => {
+    const key = limiterKey("pf:newSession", ctx.headers);
+    if (!enforceFixedWindowLimit(key, 20, 60_000)) {
+      throw new TRPCError({
+        code: "TOO_MANY_REQUESTS",
+        message: "Too many sessions, please slow down.",
+      });
+    }
     void (await maybeCleanupExpiredSessions());
     const sess = await createPFSess();
     return { sessionId: sess.id };
@@ -66,7 +79,14 @@ export const pixelForgeRouter = createTRPCRouter({
         sessionId: z.string().uuid().optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const rateKey = limiterKey("pf:upload", ctx.headers, input.sessionId ?? null);
+      if (!enforceFixedWindowLimit(rateKey, 30, 60_000)) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many uploads, please slow down.",
+        });
+      }
       void (await maybeCleanupExpiredSessions());
       // Ensure or create session
       const sessionId = input.sessionId ?? (await createPFSess()).id;
@@ -126,7 +146,14 @@ export const pixelForgeRouter = createTRPCRouter({
           .optional(),
       }),
     )
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const rateKey = limiterKey("pf:generate", ctx.headers, input.sessionId);
+      if (!enforceFixedWindowLimit(rateKey, 6, 60_000)) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many generate attempts, please slow down.",
+        });
+      }
       void (await maybeCleanupExpiredSessions());
       const { sessionId } = input;
       const sess = await ensurePFSess(sessionId);
@@ -154,9 +181,11 @@ export const pixelForgeRouter = createTRPCRouter({
       const types = new Set(input.options?.generationTypes ?? []);
       const pfOptions = {
         outputDir: outDir,
-        urlPrefix:
-          input.options?.urlPrefix ??
-          `/api/pixel-forge/files/${encodeURIComponent(sessionId)}/generated/`,
+        urlPrefix: (() => {
+          const base = `/api/pixel-forge/files/${encodeURIComponent(sessionId)}/generated/`;
+          const req = input.options?.urlPrefix;
+          return typeof req === "string" && req.startsWith(base) ? req : base;
+        })(),
         format: input.options?.format,
         quality: input.options?.quality,
         all: types.has("all") ? true : undefined,
@@ -272,10 +301,17 @@ export const pixelForgeRouter = createTRPCRouter({
       };
     }),
 
-  // Read current progress for the session (stub-ready; will be updated when generation wiring lands)
+  // Read current progress for the session with defensive rate limiting
   getGenerationProgress: publicProcedure
     .input(z.object({ sessionId: z.string().uuid() }))
-    .query(async ({ input }) => {
+    .query(async ({ ctx, input }) => {
+      const rateKey = limiterKey("pf:progress", ctx.headers, input.sessionId);
+      if (!enforceFixedWindowLimit(rateKey, 60, 60_000)) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Polling too fast, please reduce frequency.",
+        });
+      }
       const progress = await readPFProgress(input.sessionId);
       return progress;
     }),
@@ -283,8 +319,24 @@ export const pixelForgeRouter = createTRPCRouter({
   // Create a ZIP of all generated assets (plus meta/manifest) and return a downloadable URL
   zipAssets: publicProcedure
     .input(z.object({ sessionId: z.string().uuid() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const rateKey = limiterKey("pf:zip", ctx.headers, input.sessionId);
+      if (!enforceFixedWindowLimit(rateKey, 6, 60_000)) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many ZIP requests, please slow down.",
+        });
+      }
       void (await maybeCleanupExpiredSessions());
+
+      const lockKey = `pf:zip:${input.sessionId}`;
+      if (!acquireLock(lockKey)) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "ZIP already in progress for this session.",
+        });
+      }
+
       try {
         const sess = await ensurePFSess(input.sessionId);
         const zipPath = path.join(sess.root, "assets.zip");
@@ -312,11 +364,20 @@ export const pixelForgeRouter = createTRPCRouter({
           message: "Failed to create ZIP archive",
           cause: err as Error,
         });
+      } finally {
+        releaseLock(lockKey);
       }
     }),
 
   // Cleanup expired sessions (TTL-based)
-  cleanupExpired: publicProcedure.mutation(async () => {
+  cleanupExpired: publicProcedure.mutation(async ({ ctx }) => {
+    const rateKey = limiterKey("pf:cleanupExpired", ctx.headers);
+    if (!enforceFixedWindowLimit(rateKey, 2, 60_000)) {
+      throw new TRPCError({
+        code: "TOO_MANY_REQUESTS",
+        message: "Too many cleanup requests, please slow down.",
+      });
+    }
     const res = await cleanupExpiredPF();
     return res; // { removed: string[] }
   }),
@@ -324,7 +385,14 @@ export const pixelForgeRouter = createTRPCRouter({
   // Cleanup and remove a session's temporary files
   cleanupSession: publicProcedure
     .input(z.object({ sessionId: z.string().uuid() }))
-    .mutation(async ({ input }) => {
+    .mutation(async ({ ctx, input }) => {
+      const rateKey = limiterKey("pf:cleanupSession", ctx.headers, input.sessionId);
+      if (!enforceFixedWindowLimit(rateKey, 10, 60_000)) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many cleanup requests, please slow down.",
+        });
+      }
       await cleanupPFSess(input.sessionId);
       return { ok: true };
     }),
