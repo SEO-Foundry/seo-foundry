@@ -68,14 +68,14 @@
   - Provide simple progress (optional) or a disabled state until ready
   - _Requirements: 4.4_
 
-- [ ] 10. Error handling and user feedback
+- [x] 10. Error handling and user feedback
   - Validate input image MIME/size; return helpful messages
   - Display pixel-forge errors with remediations (e.g., unsupported format)
   - Detect ImageMagick absence and show installation guidance in UI
   - Log server-side errors with structured details; show user-friendly messages
   - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5_
 
-- [ ] 11. Session cleanup and file lifecycle
+- [x] 11. Session cleanup and file lifecycle
   - Implement TTL cleanup (24h) job/endpoint
   - Manual clear triggers filesystem cleanup and client reset
   - Ensure no orphaned files; handle partial failures gracefully
@@ -88,13 +88,13 @@
   - Generate stable preview/download URLs consumed by ResultGrid
   - _Requirements: 4.1, 4.2, 4.3_
 
-- [ ] 13. Tests
+- [x] 13. Tests
   - Unit tests for tRPC (upload, generate, progress, zip, cleanup) with pixel-forge mocked
   - Integration: upload → generate → download → zip → cleanup
   - Error paths: invalid MIME/size, missing ImageMagick, pixel-forge failures
   - _Requirements: All requirements validation_
 
-- [ ] 14. Production hardening
+- [x] 14. Production hardening
   - File size limits & MIME allowlist
   - Rate limiting for generation
   - Memory/CPU guardrails; observe for Jimp fallback usage
