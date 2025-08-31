@@ -12,6 +12,10 @@ import {
 } from "@/server/lib/pixel-forge/session";
 import { ensureImageEngine } from "@/server/lib/pixel-forge/deps";
 import { generateAssets as pfGenerateAssets } from "pixel-forge";
+import archiver from "archiver";
+import type { Archiver } from "archiver";
+import { createWriteStream } from "fs";
+import { promises as fsp } from "fs";
 
 // Helper to construct a stable file URL that a future route handler will serve
 function toFileUrl(sessionId: string, sessionRoot: string, absoluteFilePath: string): string {
@@ -205,6 +209,32 @@ export const pixelForgeRouter = createTRPCRouter({
     .query(async ({ input }) => {
       const progress = await readPFProgress(input.sessionId);
       return progress;
+    }),
+
+  // Create a ZIP of all generated assets (plus meta/manifest) and return a downloadable URL
+  zipAssets: publicProcedure
+    .input(z.object({ sessionId: z.string().uuid() }))
+    .mutation(async ({ input }) => {
+      const sess = await ensurePFSess(input.sessionId);
+      const zipPath = path.join(sess.root, "assets.zip");
+
+      // Build ZIP archive
+      await new Promise<void>((resolve, reject) => {
+        const output = createWriteStream(zipPath);
+        const archive: Archiver = archiver("zip", { zlib: { level: 9 } });
+
+        output.on("close", resolve);
+        archive.on("error", reject);
+
+        archive.pipe(output);
+        // Add generated directory contents at root of archive
+        archive.directory(sess.generatedDir, false);
+        void archive.finalize();
+      });
+
+      const stat = await fsp.stat(zipPath).catch(() => null);
+      const zipUrl = toFileUrl(input.sessionId, sess.root, zipPath);
+      return { zipUrl, size: stat?.size ?? 0 };
     }),
 
   // Cleanup and remove a session's temporary files
