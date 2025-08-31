@@ -23,46 +23,46 @@
   - On missing ImageMagick, switch `ImageProcessor.setEngine('jimp')` and warn in result
   - _Requirements: 3.1, 3.2, 5.2, 5.3, 5.4_
 
-- [ ] 3. Update SidebarOptions for pixel-forge generation types
+- [x] 3. Update SidebarOptions for pixel-forge generation types
   - Replace mock options (sizes/styles/formats) with: favicon, pwa, social, seo, web, all + supplemental `transparent`
   - Add “Generate All” control (selects all types)
   - Show dynamic expected file counts per selection (computed in client or fetched from server)
   - _Requirements: 2.1, 2.2, 2.3, 8.1_
 
-- [ ] 4. Add metadata customization fields
+- [x] 4. Add metadata customization fields
   - Add optional appName, description, themeColor, backgroundColor
   - Validate color hex values; provide defaults
   - Add output options: format (png/jpeg/webp), quality slider, urlPrefix
   - Show expected file counts summary
   - _Requirements: 2.5, 5.1, 5.2, 5.5, 6.5_
 
-- [-] 5. Wire pixel-forge page to tRPC procedures
+- [x] 5. Wire pixel-forge page to tRPC procedures
   - Replace mock `generate()` with `generateAssets` mutation
   - Replace client-only upload with tRPC `uploadImage` (base64 path or future route handler)
   - Update local state to consume real `PixelForgeResult`
   - Maintain UI/UX (loading, disabled states, error banners)
   - _Requirements: 1.1, 1.5, 3.1, 9.3_
 
-- [ ] 6. Implement progress tracking system
+- [x] 6. Implement progress tracking system
   - Add a server-side progress module: write per-session `progress.json` or keep progress in memory keyed by session
   - Create `getGenerationProgress` query to read progress info
   - Update the existing progress indicator to poll/subscribe, display current operation and percentage
   - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.5_
 
-- [ ] 7. Update ResultGrid for real assets
+- [x] 7. Update ResultGrid for real assets
   - Render real file info (dimensions, file size, purpose/category)
   - Group assets by category (favicon, pwa, social, seo, transparent, meta)
   - Wire single-file Download to real URLs
   - Provide lightbox preview on click
   - _Requirements: 4.1, 4.2, 4.3, 6.1, 6.2, 6.4, 6.6_
 
-- [ ] 8. Meta tags display and copy
+- [x] 8. Meta tags display and copy
   - Add a dedicated section for `meta-tags.html` content
   - Provide copy-to-clipboard and minimal formatting (no external highlighter needed)
   - Include short instructions on usage
   - _Requirements: 4.5, 6.3_
 
-- [ ] 9. “Download All” as ZIP
+- [x] 9. “Download All” as ZIP
   - Create a `zipAssets` tRPC mutation (or Next route) that zips session’s `/generated` directory
   - Include `meta-tags.html` and `manifest.json` when present
   - Provide simple progress (optional) or a disabled state until ready
