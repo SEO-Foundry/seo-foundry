@@ -6,6 +6,10 @@ import UploadArea from "@/app/_components/UploadArea";
 import ResultGrid from "@/app/_components/ResultGrid";
 import { api } from "@/trpc/react";
 
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@/server/api/root";
+type GenRes = inferRouterOutputs<AppRouter>["pixelForge"]["generateAssets"];
+
 type VariantItem = {
   id: string;
   url: string;
@@ -45,10 +49,13 @@ export default function Page() {
   const [variants, setVariants] = useState<VariantItem[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [storedPath, setStoredPath] = useState<string | null>(null);
+  const [metaHtml, setMetaHtml] = useState<string | null>(null);
+  const [metaFileUrl, setMetaFileUrl] = useState<string | null>(null);
 
   const uploadImage = api.pixelForge.uploadImage.useMutation();
   const cleanupSession = api.pixelForge.cleanupSession.useMutation();
   const generateAssetsMutation = api.pixelForge.generateAssets.useMutation();
+  const zipAssetsMutation = api.pixelForge.zipAssets.useMutation();
 
 // Progress polling for generation
 const sid = sessionId ?? "00000000-0000-0000-0000-000000000000";
@@ -96,6 +103,8 @@ const progressOp = progressData?.currentOperation ?? "Working...";
       setSessionId(null);
       setStoredPath(null);
       setVariants([]);
+      setMetaHtml(null);
+      setMetaFileUrl(null);
     }
   }, [sessionId, cleanupSession]);
 
@@ -107,7 +116,7 @@ const progressOp = progressData?.currentOperation ?? "Working...";
     if (!sessionId || !storedPath) return;
     setGenerating(true);
     try {
-      const res = (await generateAssetsMutation.mutateAsync({
+      const res: GenRes = await generateAssetsMutation.mutateAsync({
         sessionId,
         imagePath: storedPath,
         options: {
@@ -122,9 +131,9 @@ const progressOp = progressData?.currentOperation ?? "Working...";
           quality: selections.quality,
           urlPrefix: selections.urlPrefix ?? undefined,
         },
-      })) as { assets: ServerAsset[] };
+      });
 
-      const newVariants: VariantItem[] = res.assets.map((a: ServerAsset) => {
+      const newVariants: VariantItem[] = (res.assets as ServerAsset[]).map((a: ServerAsset) => {
         const ext = a.fileName.split(".").pop()?.toUpperCase() ?? "PNG";
         const re = /(\d{2,4})x(\d{2,4})/;
         const dimsMatch = re.exec(a.fileName);
@@ -141,6 +150,9 @@ const progressOp = progressData?.currentOperation ?? "Working...";
         };
       });
       setVariants(newVariants);
+      // Capture meta tags for display section
+      setMetaHtml(res.metaTags?.html ?? null);
+      setMetaFileUrl(res.metaTags?.fileUrl ?? null);
     } catch (err) {
       console.error("[pixel-forge] generation failed", err);
     } finally {
@@ -166,13 +178,21 @@ const progressOp = progressData?.currentOperation ?? "Working...";
   }, []);
 
   const onDownloadAll = useCallback(async () => {
-    // Sequential downloads (simple mock without zipping)
-    for (const v of variants) {
-      // Small delay helps some browsers accept multiple downloads
-      await delay(80);
-      triggerDownload(v.url, v.filename);
+    if (!sessionId) return;
+    try {
+      const res = await zipAssetsMutation.mutateAsync({ sessionId });
+      if (res.zipUrl) {
+        triggerDownload(res.zipUrl, "pixel-forge-assets.zip");
+      }
+    } catch (err) {
+      console.error("[pixel-forge] zip download failed", err);
+      // Fallback: sequential downloads
+      for (const v of variants) {
+        await delay(80);
+        triggerDownload(v.url, v.filename);
+      }
     }
-  }, [variants]);
+  }, [sessionId, variants, zipAssetsMutation]);
 
   return (
     <main className="min-h-[calc(100vh-5rem)] text-white">
@@ -230,16 +250,16 @@ const progressOp = progressData?.currentOperation ?? "Working...";
 
                   <button
                     type="button"
-                    disabled={!variants.length}
+                    disabled={!variants.length || generating || zipAssetsMutation.isPending}
                     onClick={onDownloadAll}
                     className={[
                       "rounded-md px-3 py-2 text-xs font-medium transition",
-                      variants.length
+                      variants.length && !generating
                         ? "border border-white/10 bg-white/10 text-white/85 hover:bg-white/20"
                         : "cursor-not-allowed border border-white/10 bg-white/5 text-white/50",
                     ].join(" ")}
                   >
-                    Download All
+                    {zipAssetsMutation.isPending ? "Preparing ZIP..." : "Download All"}
                   </button>
                 </div>
 
@@ -274,6 +294,36 @@ const progressOp = progressData?.currentOperation ?? "Working...";
                   onClearResults={onClearResults}
                 />
               </div>
+
+              {/* Meta Tags */}
+              {metaHtml ? (
+                <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-white/90">Meta Tags</h3>
+                    <div className="flex items-center gap-2">
+                      {metaFileUrl ? (
+                        <a
+                          href={metaFileUrl}
+                          download="meta-tags.html"
+                          className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[10px] text-white/85 hover:bg-white/20"
+                        >
+                          Download HTML
+                        </a>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => navigator.clipboard.writeText(metaHtml)}
+                        className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[10px] text-white/85 hover:bg-white/20"
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                  <pre className="max-h-72 overflow-auto rounded-md bg-black/30 p-3 text-[11px] leading-5 text-emerald-100">
+                    <code>{metaHtml}</code>
+                  </pre>
+                </section>
+              ) : null}
             </section>
           </div>
         </div>
