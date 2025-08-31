@@ -2,14 +2,9 @@ import { promises as fs } from "fs";
 import path from "path";
 import type { NextRequest } from "next/server";
 import { ensureSession } from "@/server/lib/pixel-forge/session";
-import { lookup as mimeLookup } from "mime-types";
 
 export const runtime = "nodejs";
 
-function detectContentType(filePath: string): string {
-  const ct = mimeLookup(filePath);
-  return (typeof ct === "string" && ct.length > 0 ? ct : "application/octet-stream") as string;
-}
 
 function makeETag(size: number, mtimeMs: number): string {
   // Weak ETag: size-mtime fingerprint
@@ -83,7 +78,7 @@ export async function GET(
     headers.set("Cache-Control", "private, max-age=3600");
     headers.set("X-Content-Type-Options", "nosniff");
 
-    const ct = detectContentType(normalized);
+    const ct = contentTypeFor(path.extname(normalized));
     headers.set("Content-Type", ct);
     if (ifNoneMatch && ifNoneMatch === etag) {
       return new Response(null, { status: 304, headers });
