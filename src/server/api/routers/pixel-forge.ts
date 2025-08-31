@@ -1,6 +1,7 @@
 import path from "path";
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
+import { TRPCError } from "@trpc/server";
 import {
   createSession as createPFSess,
   ensureSession as ensurePFSess,
@@ -9,6 +10,8 @@ import {
   cleanupSession as cleanupPFSess,
   writeProgress as writePFProgress,
   updateMeta as updatePFMeta,
+  isAllowedMime,
+  cleanupExpiredSessions as cleanupExpiredPF,
 } from "@/server/lib/pixel-forge/session";
 import { ensureImageEngine } from "@/server/lib/pixel-forge/deps";
 import { generateAssets as pfGenerateAssets } from "pixel-forge";
@@ -17,6 +20,25 @@ import type { Archiver } from "archiver";
 import { createWriteStream } from "fs";
 import { promises as fsp } from "fs";
 import { imageSize } from "image-size";
+
+// Minimal result type from pixel-forge programmatic API
+type PixelForgeResult = {
+  files: {
+    favicon?: string[];
+    pwa?: string[];
+    social?: string[];
+    web?: string[];
+    seo?: string[];
+    transparent?: string[];
+  };
+  manifest?: string;
+  images?: unknown;
+  metaTags: {
+    html: string;
+    tags: unknown;
+  };
+  summary?: unknown;
+};
 
 // Helper to construct a stable file URL that a future route handler will serve
 function toFileUrl(sessionId: string, sessionRoot: string, absoluteFilePath: string): string {
@@ -38,7 +60,7 @@ export const pixelForgeRouter = createTRPCRouter({
       z.object({
         fileName: z.string().min(1),
         fileData: z.string().min(1), // raw base64 (no data URL prefix)
-        mimeType: z.string().min(1),
+        mimeType: z.string().min(1).refine((m) => isAllowedMime(m), "Unsupported MIME type"),
         sessionId: z.string().uuid().optional(),
       }),
     )
@@ -139,7 +161,22 @@ export const pixelForgeRouter = createTRPCRouter({
         currentOperation: "Generating assets...",
       });
 
-      const result = await pfGenerateAssets(imageAbsPath, pfOptions);
+      let result: PixelForgeResult;
+      try {
+        result = (await pfGenerateAssets(imageAbsPath, pfOptions)) as PixelForgeResult;
+      } catch (err) {
+        await writePFProgress(sessionId, {
+          current: 100,
+          total: 100,
+          currentOperation: "Failed",
+        });
+        await updatePFMeta(sessionId, { status: "error" });
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Pixel Forge generation failed",
+          cause: err as Error,
+        });
+      }
 
       // Build asset entries with URLs pointing at our file-serving route
       const assets: Array<{
@@ -254,6 +291,12 @@ export const pixelForgeRouter = createTRPCRouter({
       const zipUrl = toFileUrl(input.sessionId, sess.root, zipPath);
       return { zipUrl, size: stat?.size ?? 0 };
     }),
+
+  // Cleanup expired sessions (TTL-based)
+  cleanupExpired: publicProcedure.mutation(async () => {
+    const res = await cleanupExpiredPF();
+    return res; // { removed: string[] }
+  }),
 
   // Cleanup and remove a session's temporary files
   cleanupSession: publicProcedure
