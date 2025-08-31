@@ -99,7 +99,7 @@ export default function SidebarOptions({ value, onChange }: Props) {
           ))}
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
+        <div className="mt-3 grid gap-2">
           <Toggle label="Transparent (post-process)" checked={Boolean(value.transparent)} onChange={() => toggleBool("transparent")} />
         </div>
       </Section>
