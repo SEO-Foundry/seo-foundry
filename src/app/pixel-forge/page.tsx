@@ -50,6 +50,18 @@ export default function Page() {
   const cleanupSession = api.pixelForge.cleanupSession.useMutation();
   const generateAssetsMutation = api.pixelForge.generateAssets.useMutation();
 
+// Progress polling for generation
+const sid = sessionId ?? "00000000-0000-0000-0000-000000000000";
+const progressQuery = api.pixelForge.getGenerationProgress.useQuery(
+  { sessionId: sid },
+  { enabled: generating && !!sessionId, refetchInterval: generating ? 600 : false }
+);
+const progressData = progressQuery.data;
+const progressTotal = progressData?.total ?? 100;
+const progressCurrent = progressData?.current ?? 0;
+const progressPct =
+  progressTotal > 0 ? Math.min(100, Math.round((progressCurrent / progressTotal) * 100)) : 0;
+const progressOp = progressData?.currentOperation ?? "Working...";
   const canGenerate = useMemo(() => {
     return !!sessionId && !!storedPath;
   }, [sessionId, storedPath]);
@@ -231,8 +243,25 @@ export default function Page() {
                   </button>
                 </div>
 
-                <div className="text-xs text-white/60">
-                  {variants.length ? `${variants.length} variants ready` : "No variants yet"}
+                <div className="min-w-[220px] text-xs">
+                  {generating ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <span className="text-white/70">{progressOp}</span>
+                        <span className="text-white/50">{progressPct}%</span>
+                      </div>
+                      <div className="mt-1 h-1.5 w-56 overflow-hidden rounded bg-white/10">
+                        <div
+                          className="h-full bg-emerald-400/70 transition-[width] duration-300"
+                          style={{ width: `${progressPct}%` }}
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-white/60">
+                      {variants.length ? `${variants.length} variants ready` : "No variants yet"}
+                    </span>
+                  )}
                 </div>
               </div>
 
