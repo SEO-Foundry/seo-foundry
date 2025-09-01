@@ -40,14 +40,10 @@ export default function PicturePressOptions({
   const validateOptions = useCallback((options: PicturePressSelections): string[] => {
     const errors: string[] = [];
 
-    // Validate quality for lossy formats
-    if (options.quality !== undefined) {
+    // Validate quality for lossy formats only
+    if (options.quality !== undefined && ["jpeg", "webp"].includes(options.outputFormat)) {
       if (options.quality < 1 || options.quality > 100) {
         errors.push("Quality must be between 1 and 100");
-      }
-      
-      if (!["jpeg", "webp"].includes(options.outputFormat)) {
-        errors.push(`Quality setting is not applicable for ${options.outputFormat.toUpperCase()} format`);
       }
     }
 
@@ -220,21 +216,36 @@ export default function PicturePressOptions({
           ))}
         </div>
 
-        {isLossyFormat && (
-          <div className="mt-3">
-            <label className="mb-1 block text-[11px] text-white/60">
-              Quality: {quality}%
-            </label>
-            <input
-              type="range"
-              min={1}
-              max={100}
-              value={quality}
-              onChange={(e) => setField("quality", Number(e.target.value))}
-              className="w-full accent-emerald-400"
-            />
+        <div className="mt-3">
+          {/* Reserve space for tooltip to prevent content shift */}
+          <div className="h-4 mb-1">
+            {!isLossyFormat && (
+              <div className="text-[10px] text-white/50 italic">
+                Quality setting not available for lossless formats
+              </div>
+            )}
           </div>
-        )}
+          <label className={[
+            "mb-1 block text-[11px]",
+            isLossyFormat ? "text-white/60" : "text-white/30"
+          ].join(" ")}>
+            Quality: {quality}%
+          </label>
+          <input
+            type="range"
+            min={1}
+            max={100}
+            value={quality}
+            onChange={(e) => setField("quality", Number(e.target.value))}
+            disabled={!isLossyFormat}
+            className={[
+              "w-full",
+              isLossyFormat 
+                ? "accent-emerald-400" 
+                : "accent-white/20 opacity-40 cursor-not-allowed"
+            ].join(" ")}
+          />
+        </div>
       </Section>
 
       <Section title="Naming Convention">
