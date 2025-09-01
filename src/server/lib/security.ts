@@ -51,7 +51,11 @@ export function getClientIp(headers: Headers): string {
 /**
  * Compose a limiter key for a route, considering sessionId when available.
  */
-export function limiterKey(route: string, headers: Headers, sessionId?: string | null): string {
+export function limiterKey(
+  route: string,
+  headers: Headers,
+  sessionId?: string | null,
+): string {
   const ip = getClientIp(headers);
   return sessionId ? `${route}:${ip}:${sessionId}` : `${route}:${ip}`;
 }
