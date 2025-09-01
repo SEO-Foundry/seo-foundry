@@ -1,7 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type { NextRequest } from "next/server";
-import { ensureSession } from "@/server/lib/pixel-forge/session";
+import { ensurePicturePressSession } from "@/server/lib/picture-press/session";
 
 export const runtime = "nodejs";
 
@@ -21,6 +21,13 @@ function contentTypeFor(ext: string): string {
       return "image/webp";
     case ".svg":
       return "image/svg+xml";
+    case ".gif":
+      return "image/gif";
+    case ".tiff":
+    case ".tif":
+      return "image/tiff";
+    case ".bmp":
+      return "image/bmp";
     case ".ico":
       return "image/x-icon";
     case ".json":
@@ -50,7 +57,7 @@ export async function GET(
   }
 
   try {
-    const sess = await ensureSession(sessionId);
+    const sess = await ensurePicturePressSession(sessionId);
 
     // Decode each segment to prevent double-encoding issues
     const decodedSegments = filePath.map((p) => decodeURIComponent(p));
@@ -99,7 +106,19 @@ export async function GET(
     const body = new Uint8Array(data);
     return new Response(body, { status: 200, headers });
   } catch (err) {
-    console.error("[pixel-forge] file serve error:", err);
+    console.error("[picture-press] file serve error:", err);
     return new Response("Internal Server Error", { status: 500 });
   }
+}
+
+export async function HEAD(
+  req: NextRequest,
+  ctx: { params: Promise<{ sessionId: string; filePath: string[] }> },
+): Promise<Response> {
+  const getResponse = await GET(req, ctx);
+  // Return same headers but no body for HEAD requests
+  return new Response(null, {
+    status: getResponse.status,
+    headers: getResponse.headers,
+  });
 }

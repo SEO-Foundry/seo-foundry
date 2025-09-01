@@ -16,9 +16,7 @@ import {
 } from "@/server/lib/pixel-forge/session";
 import { ensureImageEngine } from "@/server/lib/pixel-forge/deps";
 import { generateAssets as pfGenerateAssets } from "pixel-forge";
-import archiver from "archiver";
-import type { Archiver } from "archiver";
-import { createWriteStream } from "fs";
+import { createDirectoryZip } from "@/server/lib/shared/zip-utils";
 import { promises as fsp } from "fs";
 import { imageSize } from "image-size";
 import {
@@ -48,7 +46,11 @@ type PixelForgeResult = {
 };
 
 // Helper to construct a stable file URL that a future route handler will serve
-function toFileUrl(sessionId: string, sessionRoot: string, absoluteFilePath: string): string {
+function toFileUrl(
+  sessionId: string,
+  sessionRoot: string,
+  absoluteFilePath: string,
+): string {
   const rel = path.relative(sessionRoot, absoluteFilePath);
   const encodedParts = rel.split(path.sep).map(encodeURIComponent).join("/");
   return `/api/pixel-forge/files/${encodeURIComponent(sessionId)}/${encodedParts}`;
@@ -75,12 +77,19 @@ export const pixelForgeRouter = createTRPCRouter({
       z.object({
         fileName: z.string().min(1),
         fileData: z.string().min(1), // raw base64 (no data URL prefix)
-        mimeType: z.string().min(1).refine((m) => isAllowedMime(m), "Unsupported MIME type"),
+        mimeType: z
+          .string()
+          .min(1)
+          .refine((m) => isAllowedMime(m), "Unsupported MIME type"),
         sessionId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const rateKey = limiterKey("pf:upload", ctx.headers, input.sessionId ?? null);
+      const rateKey = limiterKey(
+        "pf:upload",
+        ctx.headers,
+        input.sessionId ?? null,
+      );
       if (!enforceFixedWindowLimit(rateKey, 30, 60_000)) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
@@ -116,7 +125,9 @@ export const pixelForgeRouter = createTRPCRouter({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message:
-            err instanceof Error ? err.message : "Upload failed due to invalid file or size limit",
+            err instanceof Error
+              ? err.message
+              : "Upload failed due to invalid file or size limit",
           cause: err as Error,
         });
       }
@@ -206,7 +217,10 @@ export const pixelForgeRouter = createTRPCRouter({
 
       let result: PixelForgeResult;
       try {
-        result = (await pfGenerateAssets(imageAbsPath, pfOptions)) as PixelForgeResult;
+        result = (await pfGenerateAssets(
+          imageAbsPath,
+          pfOptions,
+        )) as PixelForgeResult;
       } catch (err) {
         await writePFProgress(sessionId, {
           current: 100,
@@ -342,18 +356,7 @@ export const pixelForgeRouter = createTRPCRouter({
         const zipPath = path.join(sess.root, "assets.zip");
 
         // Build ZIP archive
-        await new Promise<void>((resolve, reject) => {
-          const output = createWriteStream(zipPath);
-          const archive: Archiver = archiver("zip", { zlib: { level: 9 } });
-
-          output.on("close", resolve);
-          archive.on("error", reject);
-
-          archive.pipe(output);
-          // Add generated directory contents at root of archive
-          archive.directory(sess.generatedDir, false);
-          void archive.finalize();
-        });
+        await createDirectoryZip(sess.generatedDir, zipPath);
 
         const stat = await fsp.stat(zipPath).catch(() => null);
         const zipUrl = toFileUrl(input.sessionId, sess.root, zipPath);
@@ -386,7 +389,11 @@ export const pixelForgeRouter = createTRPCRouter({
   cleanupSession: publicProcedure
     .input(z.object({ sessionId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const rateKey = limiterKey("pf:cleanupSession", ctx.headers, input.sessionId);
+      const rateKey = limiterKey(
+        "pf:cleanupSession",
+        ctx.headers,
+        input.sessionId,
+      );
       if (!enforceFixedWindowLimit(rateKey, 10, 60_000)) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",

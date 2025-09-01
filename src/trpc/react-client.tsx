@@ -11,8 +11,8 @@ export const api = createTRPCReact<AppRouter>();
 
 function getBaseUrl() {
   if (typeof window !== "undefined") return ""; // browser should use relative url
-  // For RSC/SSR environments, default to localhost. Adapt if you deploy behind a custom host.
-  return process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+  // For RSC/SSR environments, use configured API base URL or default to localhost
+  return process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:3000";
 }
 
 export function TRPCReactProvider(props: { children: React.ReactNode }) {
@@ -41,7 +41,9 @@ export function TRPCReactProvider(props: { children: React.ReactNode }) {
 
   return (
     <api.Provider client={trpcClient} queryClient={queryClient}>
-      <QueryClientProvider client={queryClient}>{props.children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        {props.children}
+      </QueryClientProvider>
     </api.Provider>
   );
 }

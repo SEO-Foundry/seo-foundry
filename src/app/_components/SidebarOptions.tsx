@@ -23,21 +23,18 @@ type Props = {
   onChange: (next: PixelForgeSelections) => void;
 };
 
-const GENERATION_OPTIONS: Array<PixelForgeSelections["generationTypes"][number]> = [
-  "all",
-  "favicon",
-  "pwa",
-  "social",
-  "seo",
-  "web",
-];
+const GENERATION_OPTIONS: Array<
+  PixelForgeSelections["generationTypes"][number]
+> = ["all", "favicon", "pwa", "social", "seo", "web"];
 
 export default function SidebarOptions({ value, onChange }: Props) {
   const toggleType = useCallback(
     (item: PixelForgeSelections["generationTypes"][number]) => {
       const current = value.generationTypes ?? [];
       const exists = current.includes(item);
-      const nextArr = exists ? current.filter((i) => i !== item) : [...current, item];
+      const nextArr = exists
+        ? current.filter((i) => i !== item)
+        : [...current, item];
       onChange({ ...value, generationTypes: nextArr });
     },
     [value, onChange],
@@ -77,7 +74,9 @@ export default function SidebarOptions({ value, onChange }: Props) {
   return (
     <aside className="h-full w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)] backdrop-blur-md">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-white/70">Options</h2>
+        <h2 className="text-sm font-semibold tracking-wider text-white/70 uppercase">
+          Options
+        </h2>
         <button
           type="button"
           onClick={reset}
@@ -100,7 +99,11 @@ export default function SidebarOptions({ value, onChange }: Props) {
         </div>
 
         <div className="mt-3 grid gap-2">
-          <Toggle label="Transparent (post-process)" checked={Boolean(value.transparent)} onChange={() => toggleBool("transparent")} />
+          <Toggle
+            label="Transparent (post-process)"
+            checked={Boolean(value.transparent)}
+            onChange={() => toggleBool("transparent")}
+          />
         </div>
       </Section>
 
@@ -145,10 +148,14 @@ export default function SidebarOptions({ value, onChange }: Props) {
               { value: "jpeg", label: "JPEG" },
               { value: "webp", label: "WebP" },
             ]}
-            onChange={(v) => setField("format", v as PixelForgeSelections["format"])}
+            onChange={(v) =>
+              setField("format", v as PixelForgeSelections["format"])
+            }
           />
           <div>
-            <label className="mb-1 block text-[11px] text-white/60">Quality: {quality}</label>
+            <label className="mb-1 block text-[11px] text-white/60">
+              Quality: {quality}
+            </label>
             <input
               type="range"
               min={1}
@@ -177,13 +184,19 @@ export default function SidebarOptions({ value, onChange }: Props) {
 function Section(props: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-5">
-      <h3 className="mb-2 text-xs font-medium tracking-wide text-white/60">{props.title}</h3>
+      <h3 className="mb-2 text-xs font-medium tracking-wide text-white/60">
+        {props.title}
+      </h3>
       {props.children}
     </div>
   );
 }
 
-function CheckPill(props: { label: string; checked: boolean; onChange: () => void }) {
+function CheckPill(props: {
+  label: string;
+  checked: boolean;
+  onChange: () => void;
+}) {
   return (
     <button
       type="button"
@@ -202,7 +215,11 @@ function CheckPill(props: { label: string; checked: boolean; onChange: () => voi
   );
 }
 
-function Toggle(props: { label: string; checked: boolean; onChange: () => void }) {
+function Toggle(props: {
+  label: string;
+  checked: boolean;
+  onChange: () => void;
+}) {
   return (
     <label className="flex cursor-pointer items-center justify-between rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80 hover:bg-white/10">
       <span>{props.label}</span>
@@ -219,21 +236,33 @@ function Toggle(props: { label: string; checked: boolean; onChange: () => void }
           ].join(" ")}
         />
       </span>
-      <input type="checkbox" className="sr-only" checked={props.checked} onChange={props.onChange} />
+      <input
+        type="checkbox"
+        className="sr-only"
+        checked={props.checked}
+        onChange={props.onChange}
+      />
     </label>
   );
 }
 
-function InputText(props: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+function InputText(props: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] text-white/60">{props.label}</span>
+      <span className="mb-1 block text-[11px] text-white/60">
+        {props.label}
+      </span>
       <input
         type="text"
         value={props.value}
         placeholder={props.placeholder}
         onChange={(e) => props.onChange(e.target.value)}
-        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white/90 placeholder:text-white/40 outline-none focus:border-emerald-400/40"
+        className="w-full rounded-md border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-white/90 outline-none placeholder:text-white/40 focus:border-emerald-400/40"
       />
     </label>
   );
@@ -247,7 +276,9 @@ function Select(props: {
 }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-[11px] text-white/60">{props.label}</span>
+      <span className="mb-1 block text-[11px] text-white/60">
+        {props.label}
+      </span>
       <select
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}

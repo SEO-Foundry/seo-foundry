@@ -1,10 +1,13 @@
-
 import { describe, it, expect, vi } from "vitest";
 import path from "path";
 import { promises as fs } from "fs";
 import { appRouter } from "@/server/api/root";
 import { createTRPCContext } from "@/server/api/trpc";
-import { createSession, ensureSession, saveBase64Upload } from "@/server/lib/pixel-forge/session";
+import {
+  createSession,
+  ensureSession,
+  saveBase64Upload,
+} from "@/server/lib/pixel-forge/session";
 // Mock Prisma db to avoid real database usage in tests
 vi.mock("@/server/db", () => ({ db: {} }));
 
@@ -37,7 +40,11 @@ vi.mock("pixel-forge", () => {
       await fs.writeFile(f2, tinyPng);
       // write a minimal manifest
       const manifestPath = path.join(opts.outputDir, "site.webmanifest");
-      await fs.writeFile(manifestPath, JSON.stringify({ name: "Test" }), "utf8");
+      await fs.writeFile(
+        manifestPath,
+        JSON.stringify({ name: "Test" }),
+        "utf8",
+      );
       return {
         files: {
           favicon: ["favicon-16x16.png"],
@@ -65,7 +72,9 @@ const SMALL_PNG_BASE64 =
 
 describe("pixel-forge router", () => {
   it("creates a session via newSession", async () => {
-    const ctx = await createTRPCContext({ headers: headersWithIP("203.0.113.10") });
+    const ctx = await createTRPCContext({
+      headers: headersWithIP("203.0.113.10"),
+    });
     const caller = appRouter.createCaller(ctx);
     const { sessionId } = await caller.pixelForge.newSession();
     expect(sessionId).toMatch(/^[0-9a-fA-F-]{36}$/);
@@ -74,7 +83,9 @@ describe("pixel-forge router", () => {
   });
 
   it("uploads an image and returns previewUrl and storedPath", async () => {
-    const ctx = await createTRPCContext({ headers: headersWithIP("203.0.113.11") });
+    const ctx = await createTRPCContext({
+      headers: headersWithIP("203.0.113.11"),
+    });
     const caller = appRouter.createCaller(ctx);
 
     const { sessionId } = await caller.pixelForge.newSession();
@@ -90,7 +101,9 @@ describe("pixel-forge router", () => {
   });
 
   it("generates assets and annotates dimensions/bytes; enforces safe urlPrefix", async () => {
-    const ctx = await createTRPCContext({ headers: headersWithIP("203.0.113.12") });
+    const ctx = await createTRPCContext({
+      headers: headersWithIP("203.0.113.12"),
+    });
     const caller = appRouter.createCaller(ctx);
 
     // Create session and upload file using utility to control storedPath
@@ -160,22 +173,31 @@ describe("pixel-forge router", () => {
   });
 
   it("creates a ZIP bundle and returns a url", async () => {
-    const ctx = await createTRPCContext({ headers: headersWithIP("203.0.113.14") });
+    const ctx = await createTRPCContext({
+      headers: headersWithIP("203.0.113.14"),
+    });
     const caller = appRouter.createCaller(ctx);
 
     const { id: sessionId, root } = await createSession();
     // Write at least one generated file to archive
     const genDir = path.join(root, "generated");
     await fs.mkdir(genDir, { recursive: true });
-    await fs.writeFile(path.join(genDir, "favicon-16x16.png"), Buffer.from(SMALL_PNG_BASE64, "base64"));
+    await fs.writeFile(
+      path.join(genDir, "favicon-16x16.png"),
+      Buffer.from(SMALL_PNG_BASE64, "base64"),
+    );
 
     const res = await caller.pixelForge.zipAssets({ sessionId });
-    expect(res.zipUrl).toContain(`/api/pixel-forge/files/${sessionId}/assets.zip`);
+    expect(res.zipUrl).toContain(
+      `/api/pixel-forge/files/${sessionId}/assets.zip`,
+    );
     expect(res.size).toBeGreaterThan(0);
   });
 
   it("cleans up expired sessions", async () => {
-    const ctx = await createTRPCContext({ headers: headersWithIP("203.0.113.15") });
+    const ctx = await createTRPCContext({
+      headers: headersWithIP("203.0.113.15"),
+    });
     const caller = appRouter.createCaller(ctx);
 
     await createSession(1); // expires almost immediately

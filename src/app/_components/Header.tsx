@@ -1,14 +1,15 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { Dialog, DialogPanel } from '@headlessui/react';
-import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
+import { useState } from "react";
+import Link from "next/link";
+import { Dialog, DialogPanel } from "@headlessui/react";
+import { Bars3Icon, XMarkIcon } from "@heroicons/react/24/outline";
 
 const navigation = [
-  { name: 'Home', href: '/' },
-  { name: 'Pixel Forge', href: '/pixel-forge' },
-  { name: 'Schema Smith', href: '/schema-smith' },
+  { name: "Home", href: "/" },
+  { name: "Pixel Forge", href: "/pixel-forge" },
+  { name: "Picture Press", href: "/picture-press" },
+  { name: "Schema Smith", href: "/schema-smith" },
 ];
 
 export default function Header() {
@@ -28,7 +29,9 @@ export default function Header() {
             <div className="flex items-center gap-2">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
               <span className="text-sm font-semibold tracking-wide text-white/90">
-                SEO <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">Foundry</span>
+                <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">
+                SEO Foundry
+                </span>
               </span>
             </div>
           </Link>
@@ -72,16 +75,27 @@ export default function Header() {
         </div>
       </nav>
 
-      <Dialog open={mobileMenuOpen} onClose={setMobileMenuOpen} className="lg:hidden">
+      <Dialog
+        open={mobileMenuOpen}
+        onClose={setMobileMenuOpen}
+        className="lg:hidden"
+      >
         <div className="fixed inset-0 z-50" />
         <DialogPanel className="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto border-l border-white/10 bg-[#0b0b13]/95 p-6 backdrop-blur-md sm:max-w-sm">
           <div className="flex items-center gap-x-6">
-            <Link href="/" className="-m-1.5 p-1.5" onClick={() => setMobileMenuOpen(false)}>
+            <Link
+              href="/"
+              className="-m-1.5 p-1.5"
+              onClick={() => setMobileMenuOpen(false)}
+            >
               <span className="sr-only">SEO Foundry</span>
               <div className="flex items-center gap-2">
                 <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
                 <span className="text-sm font-semibold tracking-wide text-white/90">
-                  SEO <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">Foundry</span>
+                  SEO{" "}
+                  <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">
+                    Foundry
+                  </span>
                 </span>
               </div>
             </Link>

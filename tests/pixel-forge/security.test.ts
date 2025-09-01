@@ -10,7 +10,9 @@ describe("security: rate limiter", () => {
   it("allows first N requests and blocks after limit within window", () => {
     const key = "test:rl:1";
     // fresh window
-    const allowed = Array.from({ length: 5 }, () => enforceFixedWindowLimit(key, 5, 10_000));
+    const allowed = Array.from({ length: 5 }, () =>
+      enforceFixedWindowLimit(key, 5, 10_000),
+    );
     expect(allowed.every(Boolean)).toBe(true);
     // next one should be blocked
     expect(enforceFixedWindowLimit(key, 5, 10_000)).toBe(false);

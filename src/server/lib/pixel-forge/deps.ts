@@ -16,7 +16,11 @@ export async function ensureImageEngine(): Promise<{
     const available = await ImageProcessor.checkImageMagick();
     if (available) {
       ImageProcessor.setEngine("magick");
-      return { engine: "magick", available: true, note: "Using ImageMagick engine." };
+      return {
+        engine: "magick",
+        available: true,
+        note: "Using ImageMagick engine.",
+      };
     }
     ImageProcessor.setEngine("jimp");
     return {

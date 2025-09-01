@@ -91,9 +91,13 @@ function extForMime(mime: string): string {
 }
 
 export function isAllowedMime(mime: string): boolean {
-  return ["image/png", "image/jpeg", "image/jpg", "image/webp", "image/svg+xml"].includes(
-    mime.toLowerCase(),
-  );
+  return [
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/svg+xml",
+  ].includes(mime.toLowerCase());
 }
 
 async function writeJsonAtomic(p: string, data: unknown): Promise<void> {
@@ -111,7 +115,9 @@ export async function readJsonSafe<T = unknown>(p: string): Promise<T | null> {
   }
 }
 
-export async function createSession(ttlMs: number = DEFAULT_TTL_MS): Promise<EnsureSessionPaths> {
+export async function createSession(
+  ttlMs: number = DEFAULT_TTL_MS,
+): Promise<EnsureSessionPaths> {
   const id = crypto.randomUUID();
   const root = path.join(getTempRoot(), id);
   const uploadsDir = path.join(root, UPLOADS);
@@ -131,13 +137,19 @@ export async function createSession(ttlMs: number = DEFAULT_TTL_MS): Promise<Ens
   await writeJsonAtomic(metaPath, meta);
 
   // Initialize progress
-  const progress: GenerationProgress = { current: 0, total: 0, currentOperation: "Idle" };
+  const progress: GenerationProgress = {
+    current: 0,
+    total: 0,
+    currentOperation: "Idle",
+  };
   await writeJsonAtomic(progressPath, progress);
 
   return { id, root, uploadsDir, generatedDir, progressPath, metaPath };
 }
 
-export async function ensureSession(sessionId: string): Promise<EnsureSessionPaths> {
+export async function ensureSession(
+  sessionId: string,
+): Promise<EnsureSessionPaths> {
   const root = path.join(getTempRoot(), sessionId);
   const uploadsDir = path.join(root, UPLOADS);
   const generatedDir = path.join(root, GENERATED);
@@ -149,7 +161,14 @@ export async function ensureSession(sessionId: string): Promise<EnsureSessionPat
   }
   await ensureDir(uploadsDir);
   await ensureDir(generatedDir);
-  return { id: sessionId, root, uploadsDir, generatedDir, progressPath, metaPath };
+  return {
+    id: sessionId,
+    root,
+    uploadsDir,
+    generatedDir,
+    progressPath,
+    metaPath,
+  };
 }
 
 export async function saveBase64Upload(params: {
@@ -163,7 +182,13 @@ export async function saveBase64Upload(params: {
   size: number;
   originalName: string;
 }> {
-  const { sessionId, fileName, base64Data, mimeType, maxBytes = 20 * 1024 * 1024 } = params;
+  const {
+    sessionId,
+    fileName,
+    base64Data,
+    mimeType,
+    maxBytes = 20 * 1024 * 1024,
+  } = params;
 
   if (!isAllowedMime(mimeType)) {
     throw new Error(`Unsupported MIME type: ${mimeType}`);
@@ -206,12 +231,17 @@ export async function saveBase64Upload(params: {
   return { savedPath: outPath, size: buf.byteLength, originalName: fileName };
 }
 
-export async function writeProgress(sessionId: string, progress: GenerationProgress): Promise<void> {
+export async function writeProgress(
+  sessionId: string,
+  progress: GenerationProgress,
+): Promise<void> {
   const sess = await ensureSession(sessionId);
   await writeJsonAtomic(sess.progressPath, progress);
 }
 
-export async function readProgress(sessionId: string): Promise<GenerationProgress> {
+export async function readProgress(
+  sessionId: string,
+): Promise<GenerationProgress> {
   const sess = await ensureSession(sessionId);
   const p = await readJsonSafe<GenerationProgress>(sess.progressPath);
   return (
@@ -223,7 +253,9 @@ export async function readProgress(sessionId: string): Promise<GenerationProgres
   );
 }
 
-export async function readMeta(sessionId: string): Promise<GenerationSessionMeta | null> {
+export async function readMeta(
+  sessionId: string,
+): Promise<GenerationSessionMeta | null> {
   const sess = await ensureSession(sessionId);
   return (await readJsonSafe<GenerationSessionMeta>(sess.metaPath)) ?? null;
 }
@@ -253,12 +285,12 @@ export async function cleanupSession(sessionId: string): Promise<void> {
     console.warn(`[pixel-forge] cleanup warning for ${sessionId}:`, err);
   }
 }
- 
+
 export async function cleanupExpiredSessions(): Promise<{ removed: string[] }> {
   const root = getTempRoot();
   const removed: string[] = [];
   if (!(await pathExists(root))) return { removed };
- 
+
   const entries = await fs.readdir(root, { withFileTypes: true });
   for (const e of entries) {
     if (!e.isDirectory()) continue;
@@ -278,14 +310,16 @@ export async function cleanupExpiredSessions(): Promise<{ removed: string[] }> {
   }
   return { removed };
 }
- 
+
 // Opportunistic TTL cleanup guard to avoid running too often per server instance
 let __pf_lastCleanupAt = 0;
 /**
  * Run TTL cleanup at most once per minIntervalMs for this server instance.
  * Useful in serverless-ish environments where a real cron is not available.
  */
-export async function maybeCleanupExpiredSessions(minIntervalMs = 60 * 60 * 1000): Promise<{
+export async function maybeCleanupExpiredSessions(
+  minIntervalMs = 60 * 60 * 1000,
+): Promise<{
   ran: boolean;
   removed: string[] | null;
 }> {
