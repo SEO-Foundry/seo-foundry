@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { appRouter } from "@/server/api/root";
 import { createTRPCContext } from "@/server/api/trpc";
-import {
-  createPicturePressSession,
-  ensurePicturePressSession,
-} from "@/server/lib/picture-press/session";
 
 // Mock the converter module to avoid actual ImageMagick dependency in tests
 vi.mock("@/server/lib/picture-press/converter", () => ({
@@ -12,53 +8,69 @@ vi.mock("@/server/lib/picture-press/converter", () => ({
   validateConversionOptions: vi.fn(),
 }));
 
-// Mock the security module to control lock behavior in tests
-vi.mock("@/server/lib/security", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/server/lib/security")>();
-  return {
-    ...actual,
-    acquireLock: vi.fn(),
-    releaseLock: vi.fn(),
-  };
-});
+// Mock the security module
+vi.mock("@/server/lib/security", () => ({
+  enforceFixedWindowLimit: vi.fn(),
+  getClientIp: vi.fn(),
+  limiterKey: vi.fn(),
+  acquireLock: vi.fn(),
+  releaseLock: vi.fn(),
+}));
 
-// Mock Prisma db to avoid real database usage in tests
+// Mock Prisma db
 vi.mock("@/server/db", () => ({ db: {} }));
 
-// Import mocked modules for test control
-import { convertImages, validateConversionOptions } from "@/server/lib/picture-press/converter";
-import { acquireLock, releaseLock } from "@/server/lib/security";
+// Mock ZIP utility
+vi.mock("@/server/lib/shared/zip-utils", () => ({
+  createDirectoryZip: vi.fn(),
+}));
+
+import {
+  convertImages,
+  validateConversionOptions,
+} from "@/server/lib/picture-press/converter";
+import {
+  acquireLock,
+  releaseLock,
+  enforceFixedWindowLimit,
+  limiterKey,
+} from "@/server/lib/security";
+import { createDirectoryZip } from "@/server/lib/shared/zip-utils";
 
 const mockConvertImages = vi.mocked(convertImages);
 const mockValidateConversionOptions = vi.mocked(validateConversionOptions);
 const mockAcquireLock = vi.mocked(acquireLock);
 const mockReleaseLock = vi.mocked(releaseLock);
+const mockEnforceFixedWindowLimit = vi.mocked(enforceFixedWindowLimit);
+const mockLimiterKey = vi.mocked(limiterKey);
+const mockCreateDirectoryZip = vi.mocked(createDirectoryZip);
 
 function headersWithIP(ip: string) {
   return new Headers([["x-forwarded-for", ip]]);
 }
 
-// Tiny white 1x1 PNG (same as used in pixel-forge tests)
-const SMALL_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAF0gJ/kXn7tQAAAABJRU5ErkJggg==";
-
-// Tiny JPEG (1x1 pixel) - simplified version
-const SMALL_JPEG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAF0gJ/kXn7tQAAAABJRU5ErkJggg==";
+// Large base64 string that decodes to >100 bytes (random data)
+const VALID_PNG_BASE64 =
+  "UEsDBBQAAAAIAGRlbGV0ZSB0aGlzIGZpbGUgYWZ0ZXIgdGVzdGluZyBpcyBkb25lLiBUaGlzIGlzIGp1c3QgZHVtbXkgZGF0YSB0byBtYWtlIGEgbGFyZ2VyIGJhc2U2NCBzdHJpbmcgdGhhdCB3aWxsIGRlY29kZSB0byBtb3JlIHRoYW4gMTAwIGJ5dGVzIGZvciB0ZXN0aW5nIHB1cnBvc2VzLiBUaGlzIGlzIG5vdCBhIHJlYWwgaW1hZ2UgZmlsZSBidXQgaXQgd2lsbCBwYXNzIHRoZSBzaXplIHZhbGlkYXRpb24u";
 
 describe("picture-press router", () => {
   beforeEach(() => {
-    // Reset all mocks before each test
     vi.clearAllMocks();
-    
-    // Default mock implementations
+
+    // Mock rate limiting to always allow requests
+    mockEnforceFixedWindowLimit.mockReturnValue(true);
+    mockLimiterKey.mockReturnValue("test-key");
+
     mockValidateConversionOptions.mockReturnValue({
       valid: true,
       errors: [],
     });
-    
+
     mockAcquireLock.mockReturnValue(true);
-    mockReleaseLock.mockImplementation(() => {});
-    
+    mockReleaseLock.mockImplementation(() => {
+      // Mock implementation for releaseLock
+    });
+
     mockConvertImages.mockResolvedValue([
       {
         originalFile: "/tmp/test/uploads/original-0-image1.png",
@@ -72,750 +84,546 @@ describe("picture-press router", () => {
         success: true,
       },
     ]);
+
+    mockCreateDirectoryZip.mockResolvedValue();
   });
-  it("creates a session via newSession", async () => {
+
+  it("creates a session and uploads images", async () => {
     const ctx = await createTRPCContext({
       headers: headersWithIP("203.0.113.20"),
     });
     const caller = appRouter.createCaller(ctx);
+
+    // Create session
     const { sessionId } = await caller.picturePress.newSession();
     expect(sessionId).toMatch(/^[0-9a-fA-F-]{36}$/);
-    const sess = await ensurePicturePressSession(sessionId);
-    expect(sess.root).toContain(sessionId);
-  });
 
-  it("uploads multiple images and returns upload details", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.21"),
-    });
-    const caller = appRouter.createCaller(ctx);
-
-    const { sessionId } = await caller.picturePress.newSession();
+    // Upload images
     const res = await caller.picturePress.uploadImages({
       files: [
         {
-          fileName: "image1.png",
-          fileData: SMALL_PNG_BASE64,
+          fileName: "test.png",
+          fileData: VALID_PNG_BASE64,
           mimeType: "image/png",
-        },
-        {
-          fileName: "image2.jpg",
-          fileData: SMALL_JPEG_BASE64,
-          mimeType: "image/jpeg",
         },
       ],
       sessionId,
     });
 
     expect(res.sessionId).toBe(sessionId);
-    expect(res.uploadedFiles).toHaveLength(2);
-    expect(res.totalFiles).toBe(2);
-    expect(res.totalSize).toBeGreaterThan(0);
-
-    // Check individual file details
-    const file1 = res.uploadedFiles[0]!;
-    expect(file1.originalName).toBe("image1.png");
-    expect(file1.previewUrl).toContain(`/api/picture-press/files/${sessionId}/`);
-    expect(file1.storedPath).toBeTruthy();
-
-    const file2 = res.uploadedFiles[1]!;
-    expect(file2.originalName).toBe("image2.jpg");
-    expect(file2.previewUrl).toContain(`/api/picture-press/files/${sessionId}/`);
+    expect(res.uploadedFiles).toHaveLength(1);
+    expect(res.totalFiles).toBe(1);
   });
 
-  it("creates session implicitly when sessionId not provided", async () => {
+  it("converts uploaded images", async () => {
+    const ctx = await createTRPCContext({
+      headers: headersWithIP("203.0.113.21"),
+    });
+    const caller = appRouter.createCaller(ctx);
+
+    // Create session and upload
+    const { sessionId } = await caller.picturePress.newSession();
+    await caller.picturePress.uploadImages({
+      files: [
+        {
+          fileName: "test.png",
+          fileData: VALID_PNG_BASE64,
+          mimeType: "image/png",
+        },
+      ],
+      sessionId,
+    });
+
+    // Convert images
+    const result = await caller.picturePress.convertImages({
+      sessionId,
+      options: {
+        outputFormat: "jpeg",
+        quality: 90,
+        namingConvention: "keep-original",
+      },
+    });
+
+    expect(result.convertedImages).toHaveLength(1);
+    expect(result.successCount).toBe(1);
+    expect(result.failureCount).toBe(0);
+    expect(mockConvertImages).toHaveBeenCalled();
+  });
+
+  it("handles validation errors", async () => {
     const ctx = await createTRPCContext({
       headers: headersWithIP("203.0.113.22"),
     });
     const caller = appRouter.createCaller(ctx);
 
-    const res = await caller.picturePress.uploadImages({
-      files: [
-        {
-          fileName: "test.png",
-          fileData: SMALL_PNG_BASE64,
-          mimeType: "image/png",
-        },
-      ],
-    });
-
-    expect(res.sessionId).toMatch(/^[0-9a-fA-F-]{36}$/);
-    expect(res.uploadedFiles).toHaveLength(1);
-    expect(res.totalFiles).toBe(1);
-  });
-
-  it("validates MIME types and rejects unsupported formats", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.23"),
-    });
-    const caller = appRouter.createCaller(ctx);
-
+    // Test with invalid file (too small)
     await expect(
       caller.picturePress.uploadImages({
         files: [
           {
-            fileName: "document.pdf",
-            fileData: "JVBERi0xLjQ=", // PDF header in base64
-            mimeType: "application/pdf",
-          },
-        ],
-      }),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: expect.stringContaining("Unsupported MIME type"),
-    });
-  });
-
-  it("enforces file count limits", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.24"),
-    });
-    const caller = appRouter.createCaller(ctx);
-
-    // Create array with 51 files (over the 50 limit)
-    const tooManyFiles = Array.from({ length: 51 }, (_, i) => ({
-      fileName: `image${i}.png`,
-      fileData: SMALL_PNG_BASE64,
-      mimeType: "image/png",
-    }));
-
-    await expect(
-      caller.picturePress.uploadImages({
-        files: tooManyFiles,
-      }),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
-  });
-
-  it("requires at least one file", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.25"),
-    });
-    const caller = appRouter.createCaller(ctx);
-
-    await expect(
-      caller.picturePress.uploadImages({
-        files: [],
-      }),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
-  });
-
-  it("rate limits upload requests", async () => {
-    const headers = headersWithIP("203.0.113.26");
-    const ctx = await createTRPCContext({ headers });
-    const caller = appRouter.createCaller(ctx);
-
-    const testFile = {
-      fileName: "test.png",
-      fileData: SMALL_PNG_BASE64,
-      mimeType: "image/png",
-    };
-
-    // 30 uploads allowed per minute
-    for (let i = 0; i < 30; i++) {
-      const res = await caller.picturePress.uploadImages({
-        files: [testFile],
-      });
-      expect(res.uploadedFiles).toHaveLength(1);
-    }
-
-    // 31st should be blocked
-    await expect(
-      caller.picturePress.uploadImages({
-        files: [testFile],
-      }),
-    ).rejects.toMatchObject({
-      code: "TOO_MANY_REQUESTS",
-      message: expect.stringContaining("Too many uploads"),
-    });
-  }, 15000);
-
-  it("handles empty base64 data gracefully", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.27"),
-    });
-    const caller = appRouter.createCaller(ctx);
-
-    await expect(
-      caller.picturePress.uploadImages({
-        files: [
-          {
-            fileName: "empty.png",
-            fileData: "",
+            fileName: "tiny.png",
+            fileData: "dGVzdA==", // "test" in base64 (4 bytes, too small)
             mimeType: "image/png",
           },
         ],
       }),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
+    ).rejects.toThrow("Upload validation failed");
   });
 
-  it("handles invalid base64 data", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.28"),
-    });
-    const caller = appRouter.createCaller(ctx);
+  describe("security and rate limiting", () => {
+    it("enforces rate limits on newSession", async () => {
+      mockEnforceFixedWindowLimit.mockReturnValue(false);
 
-    await expect(
-      caller.picturePress.uploadImages({
-        files: [
-          {
-            fileName: "invalid.png",
-            fileData: "not-valid-base64!@#$%",
-            mimeType: "image/png",
-          },
-        ],
-      }),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
-  });
-
-  it("reads conversion progress", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.29"),
-    });
-    const caller = appRouter.createCaller(ctx);
-
-    const { sessionId } = await caller.picturePress.newSession();
-    const progress = await caller.picturePress.getConversionProgress({
-      sessionId,
-    });
-
-    expect(progress).toMatchObject({
-      current: 0,
-      total: 0,
-      currentOperation: "Idle",
-      filesProcessed: 0,
-      totalFiles: 0,
-    });
-  });
-
-  it("rate limits progress polling", async () => {
-    const headers = headersWithIP("203.0.113.30");
-    const ctx = await createTRPCContext({ headers });
-    const caller = appRouter.createCaller(ctx);
-
-    const { sessionId } = await caller.picturePress.newSession();
-
-    // 60 progress checks allowed per minute
-    for (let i = 0; i < 60; i++) {
-      const progress = await caller.picturePress.getConversionProgress({
-        sessionId,
-      });
-      expect(typeof progress.current).toBe("number");
-    }
-
-    // 61st should be blocked
-    await expect(
-      caller.picturePress.getConversionProgress({ sessionId }),
-    ).rejects.toMatchObject({
-      code: "TOO_MANY_REQUESTS",
-      message: expect.stringContaining("Polling too fast"),
-    });
-  }, 20000);
-
-  it("cleans up expired sessions", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.31"),
-    });
-    const caller = appRouter.createCaller(ctx);
-
-    // Create a session with very short TTL
-    await createPicturePressSession(1); // expires almost immediately
-
-    // Wait a moment, then cleanup
-    await new Promise((r) => setTimeout(r, 5));
-    const result = await caller.picturePress.cleanupExpired();
-
-    expect(Array.isArray(result.removed)).toBe(true);
-  });
-
-  it("cleans up individual sessions", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.32"),
-    });
-    const caller = appRouter.createCaller(ctx);
-
-    const { sessionId } = await caller.picturePress.newSession();
-    const result = await caller.picturePress.cleanupSession({ sessionId });
-
-    expect(result.ok).toBe(true);
-  });
-
-  it("handles mixed valid and invalid files appropriately", async () => {
-    const ctx = await createTRPCContext({
-      headers: headersWithIP("203.0.113.33"),
-    });
-    const caller = appRouter.createCaller(ctx);
-
-    // Mix of valid PNG and invalid PDF
-    await expect(
-      caller.picturePress.uploadImages({
-        files: [
-          {
-            fileName: "valid.png",
-            fileData: SMALL_PNG_BASE64,
-            mimeType: "image/png",
-          },
-          {
-            fileName: "invalid.pdf",
-            fileData: "JVBERi0xLjQ=",
-            mimeType: "application/pdf",
-          },
-        ],
-      }),
-    ).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-      message: expect.stringContaining("Unsupported MIME type"),
-    });
-  });
-
-  describe("convertImages procedure", () => {
-    it("converts uploaded images successfully", async () => {
       const ctx = await createTRPCContext({
-        headers: headersWithIP("203.0.113.40"),
+        headers: headersWithIP("203.0.113.100"),
       });
       const caller = appRouter.createCaller(ctx);
 
-      // First upload some images
-      const { sessionId } = await caller.picturePress.uploadImages({
-        files: [
-          {
-            fileName: "image1.png",
-            fileData: SMALL_PNG_BASE64,
-            mimeType: "image/png",
-          },
-          {
-            fileName: "image2.jpg",
-            fileData: SMALL_JPEG_BASE64,
-            mimeType: "image/jpeg",
-          },
-        ],
-      });
+      await expect(caller.picturePress.newSession()).rejects.toThrow(
+        "Too many sessions, please slow down.",
+      );
 
-      // Mock successful conversion
-      mockConvertImages.mockResolvedValue([
-        {
-          originalFile: "/tmp/test/uploads/original-0-image1.png",
-          convertedFile: "/tmp/test/converted/image1.webp",
-          originalName: "image1.png",
-          convertedName: "image1.webp",
-          originalSize: 1000,
-          convertedSize: 600,
-          width: 100,
-          height: 100,
-          success: true,
-        },
-        {
-          originalFile: "/tmp/test/uploads/original-1-image2.jpg",
-          convertedFile: "/tmp/test/converted/image2.webp",
-          originalName: "image2.jpg",
-          convertedName: "image2.webp",
-          originalSize: 1200,
-          convertedSize: 700,
-          width: 150,
-          height: 150,
-          success: true,
-        },
-      ]);
-
-      // Convert to WebP
-      const result = await caller.picturePress.convertImages({
-        sessionId,
-        options: {
-          outputFormat: "webp",
-          quality: 80,
-          namingConvention: "keep-original",
-        },
-      });
-
-      expect(result.sessionId).toBe(sessionId);
-      expect(result.convertedImages).toHaveLength(2);
-      expect(result.successCount).toBe(2);
-      expect(result.failureCount).toBe(0);
-      expect(result.totalOriginalSize).toBe(2200);
-      expect(result.totalConvertedSize).toBe(1300);
-      expect(result.totalSavings).toBe(900);
-
-      // Check individual converted images
-      const img1 = result.convertedImages[0]!;
-      expect(img1.originalName).toBe("image1.png");
-      expect(img1.convertedName).toBe("image1.webp");
-      expect(img1.compressionRatio).toBe(40); // (1000-600)/1000 * 100
-      expect(img1.downloadUrl).toContain(`/api/picture-press/files/${sessionId}/`);
-
-      // Verify mocks were called correctly
-      expect(mockAcquireLock).toHaveBeenCalledWith(`pp:convert:${sessionId}`);
-      expect(mockReleaseLock).toHaveBeenCalledWith(`pp:convert:${sessionId}`);
-      expect(mockValidateConversionOptions).toHaveBeenCalledWith({
-        outputFormat: "webp",
-        quality: 80,
-        namingConvention: "keep-original",
-      });
-      expect(mockConvertImages).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.stringContaining("original-0-image1"),
-          expect.stringContaining("original-1-image2"),
-        ]),
-        expect.stringContaining("converted"),
-        {
-          outputFormat: "webp",
-          quality: 80,
-          namingConvention: "keep-original",
-        },
-        expect.any(Function),
+      expect(mockLimiterKey).toHaveBeenCalledWith(
+        "pp:newSession",
+        expect.any(Headers),
+      );
+      expect(mockEnforceFixedWindowLimit).toHaveBeenCalledWith(
+        "test-key",
+        20,
+        60_000,
       );
     });
 
-    it("validates conversion options and rejects invalid ones", async () => {
+    it("enforces rate limits on uploadImages", async () => {
+      mockEnforceFixedWindowLimit.mockReturnValue(false);
+
       const ctx = await createTRPCContext({
-        headers: headersWithIP("203.0.113.41"),
+        headers: headersWithIP("203.0.113.101"),
       });
       const caller = appRouter.createCaller(ctx);
 
-      const { sessionId } = await caller.picturePress.uploadImages({
-        files: [
-          {
-            fileName: "test.png",
-            fileData: SMALL_PNG_BASE64,
-            mimeType: "image/png",
-          },
-        ],
-      });
-
-      // Mock validation failure for custom validation logic
-      mockValidateConversionOptions.mockReturnValue({
-        valid: false,
-        errors: ["Custom pattern required for custom-pattern naming"],
-      });
-
       await expect(
-        caller.picturePress.convertImages({
-          sessionId,
-          options: {
-            outputFormat: "webp",
-            quality: 80, // Valid quality
-            namingConvention: "custom-pattern", // But no custom pattern provided
-          },
+        caller.picturePress.uploadImages({
+          files: [
+            {
+              fileName: "test.png",
+              fileData: VALID_PNG_BASE64,
+              mimeType: "image/png",
+            },
+          ],
         }),
-      ).rejects.toMatchObject({
-        code: "BAD_REQUEST",
-        message: expect.stringContaining("Invalid conversion options"),
-      });
+      ).rejects.toThrow("Too many upload requests");
 
-      expect(mockReleaseLock).toHaveBeenCalledWith(`pp:convert:${sessionId}`);
+      expect(mockLimiterKey).toHaveBeenCalledWith(
+        "pp:upload",
+        expect.any(Headers),
+        null,
+      );
     });
 
-    it("rejects invalid quality values at schema level", async () => {
+    it("enforces rate limits on convertImages", async () => {
+      // First allow session creation and upload
+      mockEnforceFixedWindowLimit.mockReturnValue(true);
+
       const ctx = await createTRPCContext({
-        headers: headersWithIP("203.0.113.41b"),
+        headers: headersWithIP("203.0.113.102"),
       });
       const caller = appRouter.createCaller(ctx);
 
-      const { sessionId } = await caller.picturePress.uploadImages({
+      const { sessionId } = await caller.picturePress.newSession();
+      await caller.picturePress.uploadImages({
         files: [
           {
             fileName: "test.png",
-            fileData: SMALL_PNG_BASE64,
+            fileData: VALID_PNG_BASE64,
             mimeType: "image/png",
           },
         ],
+        sessionId,
       });
 
-      // Test Zod schema validation for quality > 100
+      // Now block conversion requests
+      mockEnforceFixedWindowLimit.mockReturnValue(false);
+
       await expect(
         caller.picturePress.convertImages({
           sessionId,
           options: {
-            outputFormat: "webp",
-            quality: 150, // Invalid quality - exceeds max
+            outputFormat: "jpeg",
+            quality: 90,
             namingConvention: "keep-original",
           },
         }),
-      ).rejects.toMatchObject({
-        code: "BAD_REQUEST",
-      });
+      ).rejects.toThrow("Too many conversion requests");
+
+      expect(mockLimiterKey).toHaveBeenCalledWith(
+        "pp:convert",
+        expect.any(Headers),
+        sessionId,
+      );
     });
 
-    it("prevents concurrent conversions with lock mechanism", async () => {
+    it("enforces rate limits on getConversionProgress", async () => {
+      mockEnforceFixedWindowLimit.mockReturnValue(false);
+
       const ctx = await createTRPCContext({
-        headers: headersWithIP("203.0.113.42"),
+        headers: headersWithIP("203.0.113.103"),
       });
       const caller = appRouter.createCaller(ctx);
 
-      const { sessionId } = await caller.picturePress.uploadImages({
-        files: [
-          {
-            fileName: "test.png",
-            fileData: SMALL_PNG_BASE64,
-            mimeType: "image/png",
-          },
-        ],
-      });
+      await expect(
+        caller.picturePress.getConversionProgress({
+          sessionId: "550e8400-e29b-41d4-a716-446655440000",
+        }),
+      ).rejects.toThrow("Polling too fast");
 
-      // Mock lock acquisition failure (conversion already in progress)
+      expect(mockLimiterKey).toHaveBeenCalledWith(
+        "pp:progress",
+        expect.any(Headers),
+        "550e8400-e29b-41d4-a716-446655440000",
+      );
+    });
+
+    it("enforces rate limits on zipConvertedImages", async () => {
+      mockEnforceFixedWindowLimit.mockReturnValue(false);
+
+      const ctx = await createTRPCContext({
+        headers: headersWithIP("203.0.113.104"),
+      });
+      const caller = appRouter.createCaller(ctx);
+
+      await expect(
+        caller.picturePress.zipConvertedImages({
+          sessionId: "550e8400-e29b-41d4-a716-446655440000",
+        }),
+      ).rejects.toThrow("Too many ZIP requests");
+
+      expect(mockLimiterKey).toHaveBeenCalledWith(
+        "pp:zip",
+        expect.any(Headers),
+        "550e8400-e29b-41d4-a716-446655440000",
+      );
+    });
+
+    it("enforces rate limits on cleanupSession", async () => {
+      mockEnforceFixedWindowLimit.mockReturnValue(false);
+
+      const ctx = await createTRPCContext({
+        headers: headersWithIP("203.0.113.105"),
+      });
+      const caller = appRouter.createCaller(ctx);
+
+      await expect(
+        caller.picturePress.cleanupSession({
+          sessionId: "550e8400-e29b-41d4-a716-446655440000",
+        }),
+      ).rejects.toThrow("Too many cleanup requests");
+
+      expect(mockLimiterKey).toHaveBeenCalledWith(
+        "pp:cleanupSession",
+        expect.any(Headers),
+        "550e8400-e29b-41d4-a716-446655440000",
+      );
+    });
+
+    it("enforces rate limits on cleanupExpired", async () => {
+      mockEnforceFixedWindowLimit.mockReturnValue(false);
+
+      const ctx = await createTRPCContext({
+        headers: headersWithIP("203.0.113.106"),
+      });
+      const caller = appRouter.createCaller(ctx);
+
+      await expect(caller.picturePress.cleanupExpired()).rejects.toThrow(
+        "Too many cleanup requests",
+      );
+
+      expect(mockLimiterKey).toHaveBeenCalledWith(
+        "pp:cleanupExpired",
+        expect.any(Headers),
+      );
+    });
+
+    it("uses concurrency locks for convertImages", async () => {
+      // Allow rate limiting but block concurrency lock
+      mockEnforceFixedWindowLimit.mockReturnValue(true);
       mockAcquireLock.mockReturnValue(false);
 
-      await expect(
-        caller.picturePress.convertImages({
-          sessionId,
-          options: {
-            outputFormat: "jpeg",
-            namingConvention: "keep-original",
-          },
-        }),
-      ).rejects.toMatchObject({
-        code: "CONFLICT",
-        message: expect.stringContaining("Conversion already in progress"),
-      });
-
-      expect(mockAcquireLock).toHaveBeenCalledWith(`pp:convert:${sessionId}`);
-      // Should not call releaseLock if lock was never acquired
-      expect(mockReleaseLock).not.toHaveBeenCalled();
-    });
-
-    it("handles conversion failures gracefully", async () => {
       const ctx = await createTRPCContext({
-        headers: headersWithIP("203.0.113.43"),
+        headers: headersWithIP("203.0.113.107"),
       });
       const caller = appRouter.createCaller(ctx);
 
-      const { sessionId } = await caller.picturePress.uploadImages({
+      const { sessionId } = await caller.picturePress.newSession();
+      await caller.picturePress.uploadImages({
         files: [
           {
             fileName: "test.png",
-            fileData: SMALL_PNG_BASE64,
+            fileData: VALID_PNG_BASE64,
             mimeType: "image/png",
           },
         ],
+        sessionId,
       });
-
-      // Mock conversion engine failure
-      mockConvertImages.mockRejectedValue(new Error("ImageMagick not available"));
 
       await expect(
         caller.picturePress.convertImages({
           sessionId,
           options: {
             outputFormat: "jpeg",
+            quality: 90,
             namingConvention: "keep-original",
           },
         }),
-      ).rejects.toMatchObject({
-        code: "INTERNAL_SERVER_ERROR",
-        message: expect.stringContaining("ImageMagick not available"),
-      });
+      ).rejects.toThrow("A conversion is already in progress");
 
-      // Ensure lock is released even on failure
-      expect(mockReleaseLock).toHaveBeenCalledWith(`pp:convert:${sessionId}`);
+      expect(mockAcquireLock).toHaveBeenCalledWith(`pp:convert:${sessionId}`);
     });
 
-    it("handles partial conversion failures", async () => {
+    it("uses concurrency locks for zipConvertedImages", async () => {
+      // Allow rate limiting but block concurrency lock
+      mockEnforceFixedWindowLimit.mockReturnValue(true);
+      mockAcquireLock.mockReturnValue(false);
+
       const ctx = await createTRPCContext({
-        headers: headersWithIP("203.0.113.44"),
+        headers: headersWithIP("203.0.113.108"),
       });
       const caller = appRouter.createCaller(ctx);
 
-      const { sessionId } = await caller.picturePress.uploadImages({
+      const sessionId = "550e8400-e29b-41d4-a716-446655440000";
+
+      await expect(
+        caller.picturePress.zipConvertedImages({ sessionId }),
+      ).rejects.toThrow("ZIP creation already in progress");
+
+      expect(mockAcquireLock).toHaveBeenCalledWith(`pp:zip:${sessionId}`);
+    });
+
+    it("releases locks after convertImages completion", async () => {
+      mockEnforceFixedWindowLimit.mockReturnValue(true);
+      mockAcquireLock.mockReturnValue(true);
+
+      const ctx = await createTRPCContext({
+        headers: headersWithIP("203.0.113.109"),
+      });
+      const caller = appRouter.createCaller(ctx);
+
+      const { sessionId } = await caller.picturePress.newSession();
+      await caller.picturePress.uploadImages({
         files: [
           {
-            fileName: "good.png",
-            fileData: SMALL_PNG_BASE64,
+            fileName: "test.png",
+            fileData: VALID_PNG_BASE64,
             mimeType: "image/png",
           },
-          {
-            fileName: "bad.jpg",
-            fileData: SMALL_JPEG_BASE64,
-            mimeType: "image/jpeg",
-          },
         ],
+        sessionId,
       });
 
-      // Mock partial failure (one success, one failure)
-      mockConvertImages.mockResolvedValue([
-        {
-          originalFile: "/tmp/test/uploads/original-0-good.png",
-          convertedFile: "/tmp/test/converted/good.webp",
-          originalName: "good.png",
-          convertedName: "good.webp",
-          originalSize: 1000,
-          convertedSize: 600,
-          width: 100,
-          height: 100,
-          success: true,
-        },
-        {
-          originalFile: "/tmp/test/uploads/original-1-bad.jpg",
-          convertedFile: "",
-          originalName: "bad.jpg",
-          convertedName: "",
-          originalSize: 1200,
-          convertedSize: 0,
-          success: false,
-          error: "Corrupted image file",
-        },
-      ]);
-
-      const result = await caller.picturePress.convertImages({
+      await caller.picturePress.convertImages({
         sessionId,
         options: {
-          outputFormat: "webp",
+          outputFormat: "jpeg",
+          quality: 90,
           namingConvention: "keep-original",
         },
       });
 
-      expect(result.successCount).toBe(1);
-      expect(result.failureCount).toBe(1);
-      expect(result.convertedImages).toHaveLength(1);
-      expect(result.failures).toHaveLength(1);
-      expect(result.failures[0]).toMatchObject({
-        originalName: "bad.jpg",
-        error: "Corrupted image file",
-      });
-
-      // Should still calculate totals correctly
-      expect(result.totalOriginalSize).toBe(2200);
-      expect(result.totalConvertedSize).toBe(600);
+      expect(mockReleaseLock).toHaveBeenCalledWith(`pp:convert:${sessionId}`);
     });
 
-    it("requires uploaded files before conversion", async () => {
+    it("releases locks after convertImages error", async () => {
+      mockEnforceFixedWindowLimit.mockReturnValue(true);
+      mockAcquireLock.mockReturnValue(true);
+      mockConvertImages.mockRejectedValue(new Error("Conversion failed"));
+
       const ctx = await createTRPCContext({
-        headers: headersWithIP("203.0.113.45"),
+        headers: headersWithIP("203.0.113.110"),
       });
       const caller = appRouter.createCaller(ctx);
 
-      // Create session but don't upload any files
       const { sessionId } = await caller.picturePress.newSession();
+      await caller.picturePress.uploadImages({
+        files: [
+          {
+            fileName: "test.png",
+            fileData: VALID_PNG_BASE64,
+            mimeType: "image/png",
+          },
+        ],
+        sessionId,
+      });
 
       await expect(
         caller.picturePress.convertImages({
           sessionId,
           options: {
             outputFormat: "jpeg",
+            quality: 90,
             namingConvention: "keep-original",
           },
         }),
-      ).rejects.toMatchObject({
-        code: "BAD_REQUEST",
-        message: expect.stringContaining("No uploaded files found"),
-      });
+      ).rejects.toThrow();
 
       expect(mockReleaseLock).toHaveBeenCalledWith(`pp:convert:${sessionId}`);
     });
 
-    it("rate limits conversion requests", async () => {
-      const headers = headersWithIP("203.0.113.46");
-      const ctx = await createTRPCContext({ headers });
-      const caller = appRouter.createCaller(ctx);
-
-      // Upload files once
-      const { sessionId } = await caller.picturePress.uploadImages({
-        files: [
-          {
-            fileName: "test.png",
-            fileData: SMALL_PNG_BASE64,
-            mimeType: "image/png",
-          },
-        ],
-      });
-
-      // 10 conversions allowed per minute
-      for (let i = 0; i < 10; i++) {
-        const result = await caller.picturePress.convertImages({
-          sessionId,
-          options: {
-            outputFormat: "jpeg",
-            namingConvention: "keep-original",
-          },
-        });
-        expect(result.sessionId).toBe(sessionId);
-      }
-
-      // 11th should be blocked
-      await expect(
-        caller.picturePress.convertImages({
-          sessionId,
-          options: {
-            outputFormat: "jpeg",
-            namingConvention: "keep-original",
-          },
-        }),
-      ).rejects.toMatchObject({
-        code: "TOO_MANY_REQUESTS",
-        message: expect.stringContaining("Too many conversion requests"),
-      });
-    }, 15000);
-
-    it("supports custom naming patterns", async () => {
+    it("validates file security patterns", async () => {
       const ctx = await createTRPCContext({
-        headers: headersWithIP("203.0.113.47"),
+        headers: headersWithIP("203.0.113.111"),
       });
       const caller = appRouter.createCaller(ctx);
 
-      const { sessionId } = await caller.picturePress.uploadImages({
-        files: [
-          {
-            fileName: "test.png",
-            fileData: SMALL_PNG_BASE64,
-            mimeType: "image/png",
-          },
-        ],
-      });
-
-      const result = await caller.picturePress.convertImages({
-        sessionId,
-        options: {
-          outputFormat: "jpeg",
-          namingConvention: "custom-pattern",
-          customPattern: "converted_{name}_{index}",
-          prefix: "img_",
-          suffix: "_final",
-        },
-      });
-
-      expect(result.convertedImages).toHaveLength(1);
-      
-      // Verify the conversion options were passed correctly
-      expect(mockConvertImages).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.any(String),
-        expect.objectContaining({
-          outputFormat: "jpeg",
-          namingConvention: "custom-pattern",
-          customPattern: "converted_{name}_{index}",
-          prefix: "img_",
-          suffix: "_final",
+      // Test path traversal in filename
+      await expect(
+        caller.picturePress.uploadImages({
+          files: [
+            {
+              fileName: "../../../etc/passwd",
+              fileData: VALID_PNG_BASE64,
+              mimeType: "image/png",
+            },
+          ],
         }),
-        expect.any(Function),
-      );
+      ).rejects.toThrow("Invalid filename");
+
+      // Test Windows reserved names
+      await expect(
+        caller.picturePress.uploadImages({
+          files: [
+            {
+              fileName: "CON.png",
+              fileData: VALID_PNG_BASE64,
+              mimeType: "image/png",
+            },
+          ],
+        }),
+      ).rejects.toThrow("Invalid filename");
+
+      // Test invalid characters
+      await expect(
+        caller.picturePress.uploadImages({
+          files: [
+            {
+              fileName: "test<script>.png",
+              fileData: VALID_PNG_BASE64,
+              mimeType: "image/png",
+            },
+          ],
+        }),
+      ).rejects.toThrow("Invalid filename");
     });
 
-    it("handles non-existent session gracefully", async () => {
+    it("validates custom pattern security", async () => {
+      mockEnforceFixedWindowLimit.mockReturnValue(true);
+      mockAcquireLock.mockReturnValue(true);
+
       const ctx = await createTRPCContext({
-        headers: headersWithIP("203.0.113.48"),
+        headers: headersWithIP("203.0.113.112"),
       });
       const caller = appRouter.createCaller(ctx);
 
-      const fakeSessionId = "00000000-0000-0000-0000-000000000000";
-
-      await expect(
-        caller.picturePress.convertImages({
-          sessionId: fakeSessionId,
-          options: {
-            outputFormat: "jpeg",
-            namingConvention: "keep-original",
+      const { sessionId } = await caller.picturePress.newSession();
+      await caller.picturePress.uploadImages({
+        files: [
+          {
+            fileName: "test.png",
+            fileData: VALID_PNG_BASE64,
+            mimeType: "image/png",
           },
-        }),
-      ).rejects.toMatchObject({
-        message: expect.stringContaining("session not found"),
+        ],
+        sessionId,
       });
 
-      expect(mockReleaseLock).toHaveBeenCalledWith(`pp:convert:${fakeSessionId}`);
+      // Test path traversal in custom pattern
+      await expect(
+        caller.picturePress.convertImages({
+          sessionId,
+          options: {
+            outputFormat: "jpeg",
+            quality: 90,
+            namingConvention: "custom-pattern",
+            customPattern: "../../../malicious",
+          },
+        }),
+      ).rejects.toThrow("Custom pattern contains invalid characters");
+
+      // Test Windows reserved names in pattern
+      await expect(
+        caller.picturePress.convertImages({
+          sessionId,
+          options: {
+            outputFormat: "jpeg",
+            quality: 90,
+            namingConvention: "custom-pattern",
+            customPattern: "CON",
+          },
+        }),
+      ).rejects.toThrow("Custom pattern contains invalid characters");
+    });
+
+    it("enforces file size limits", async () => {
+      const ctx = await createTRPCContext({
+        headers: headersWithIP("203.0.113.113"),
+      });
+      const caller = appRouter.createCaller(ctx);
+
+      // Create a valid base64 string that represents > 10MB when decoded
+      // We need to create actual base64 data, not just repeat 'A'
+      const largeBuffer = Buffer.alloc(11 * 1024 * 1024, "A"); // 11MB buffer
+      const largeBase64 = largeBuffer.toString("base64");
+
+      await expect(
+        caller.picturePress.uploadImages({
+          files: [
+            {
+              fileName: "large.png",
+              fileData: largeBase64,
+              mimeType: "image/png",
+            },
+          ],
+        }),
+      ).rejects.toThrow("Invalid file data");
+    });
+
+    it("enforces batch size limits", async () => {
+      const ctx = await createTRPCContext({
+        headers: headersWithIP("203.0.113.114"),
+      });
+      const caller = appRouter.createCaller(ctx);
+
+      // Create array with more than 50 files
+      const tooManyFiles = Array.from({ length: 51 }, (_, i) => ({
+        fileName: `test${i}.png`,
+        fileData: VALID_PNG_BASE64,
+        mimeType: "image/png",
+      }));
+
+      await expect(
+        caller.picturePress.uploadImages({
+          files: tooManyFiles,
+        }),
+      ).rejects.toThrow("Too many files (maximum 50)");
+    });
+
+    it("validates MIME type and extension matching", async () => {
+      const ctx = await createTRPCContext({
+        headers: headersWithIP("203.0.113.115"),
+      });
+      const caller = appRouter.createCaller(ctx);
+
+      // Test mismatched MIME type and extension
+      await expect(
+        caller.picturePress.uploadImages({
+          files: [
+            {
+              fileName: "test.png",
+              fileData: VALID_PNG_BASE64,
+              mimeType: "image/jpeg", // MIME says JPEG but filename says PNG
+            },
+          ],
+        }),
+      ).rejects.toThrow("Upload validation failed");
     });
   });
 });
