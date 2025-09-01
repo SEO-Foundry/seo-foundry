@@ -9,11 +9,9 @@ export default defineConfig({
       "tests/**/*.test.ts",
       "tests/**/*.test.tsx",
       "tests/**/*.spec.ts",
-      "tests/**/*.spec.tsx"
+      "tests/**/*.spec.tsx",
     ],
-    exclude: [
-      "**/*.d.ts"
-    ],
+    exclude: ["**/*.d.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "html", "lcov"],
