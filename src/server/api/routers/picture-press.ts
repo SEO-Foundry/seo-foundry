@@ -442,8 +442,6 @@ export const picturePressRouter = createTRPCRouter({
 
         // Perform the conversion with enhanced error handling and performance monitoring
         let conversionResults: ConversionResult[];
-        // Track conversion start time for performance monitoring
-        const _conversionStartTime = Date.now();
         
         try {
           conversionResults = await convertImages(

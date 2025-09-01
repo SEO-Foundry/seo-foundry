@@ -483,7 +483,6 @@ export async function convertImages(
     maxConcurrency = Math.min(3, Math.max(1, Math.floor(inputFiles.length / 4))),
     memoryThreshold = 512, // 512MB
     progressGranularity = Math.max(1, Math.floor(inputFiles.length / 20)), // Report every 5%
-    enableMemoryMonitoring: _enableMemoryMonitoring = true,
     timeoutPerFile = 30,
   } = batchOptions;
 
@@ -548,7 +547,7 @@ export async function convertImages(
   }
 
   const total = inputFiles.length;
-  let _completedCount = 0;
+
   let successCount = 0;
   let failureCount = 0;
 
@@ -561,7 +560,7 @@ export async function convertImages(
   const conversionTasks = inputFiles.map((inputFile, index) => {
     return async (): Promise<ConversionResult> => {
       const originalName = path.basename(inputFile);
-      const _fileStartTime = Date.now();
+
 
       try {
         // Generate output filename with error handling
@@ -699,7 +698,7 @@ export async function convertImages(
   const results = await batchProcessor.processAll(
     conversionTasks,
     (completed, total) => {
-      _completedCount = completed;
+      // Track completion progress
       
       // Update metrics
       metrics.filesProcessed = completed;
