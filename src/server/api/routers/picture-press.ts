@@ -6,10 +6,8 @@ import { TRPCError } from "@trpc/server";
 import {
   convertImages,
   validateConversionOptions,
-  ConversionPerformanceMonitor,
   type ConversionOptions,
   type ConversionResult,
-  type BatchProcessingOptions,
 } from "@/server/lib/picture-press/converter";
 import {
   createPicturePressSession,
@@ -426,21 +424,14 @@ export const picturePressRouter = createTRPCRouter({
           
           // Fire and forget - don't await to avoid blocking conversion
           void writeConversionProgress(input.sessionId, progress).catch((error) => {
-            // Log but don't fail conversion for progress update errors
-            console.warn(`[picture-press] Progress update failed for ${input.sessionId}:`, error);
+            // Only log critical errors, ignore common file system race conditions
+            if (error instanceof Error && !error.message.includes('ENOENT')) {
+              console.warn(`[picture-press] Progress update failed for ${input.sessionId}:`, error.message);
+            }
           });
         };
 
-        // Determine optimal batch processing options based on file count and system resources
-        const batchOptions: BatchProcessingOptions = {
-          maxConcurrency: Math.min(4, Math.max(1, Math.floor(totalFiles / 3))),
-          memoryThreshold: 512, // 512MB threshold
-          progressGranularity: Math.max(1, Math.floor(totalFiles / 10)), // Report every 10%
-          enableMemoryMonitoring: true,
-          timeoutPerFile: 45, // 45 seconds per file
-        };
-
-        // Perform the conversion with enhanced error handling and performance monitoring
+        // Perform the conversion with enhanced error handling
         let conversionResults: ConversionResult[];
         
         try {
@@ -449,7 +440,6 @@ export const picturePressRouter = createTRPCRouter({
             sessPaths.convertedDir,
             input.options as ConversionOptions,
             progressCallback,
-            batchOptions,
           );
         } catch (err) {
           // Update status to error
@@ -673,34 +663,7 @@ export const picturePressRouter = createTRPCRouter({
       return { ok: true };
     }),
 
-  // Get performance metrics and system resource information
-  getPerformanceMetrics: publicProcedure.query(async ({ ctx }) => {
-    const rateKey = limiterKey("pp:metrics", ctx.headers);
-    if (!enforceFixedWindowLimit(rateKey, 10, 60_000)) {
-      throw new TRPCError({
-        code: "TOO_MANY_REQUESTS",
-        message: "Too many metrics requests, please slow down.",
-      });
-    }
 
-    const recentMetrics = ConversionPerformanceMonitor.getRecentMetrics(5);
-    const averageMetrics = ConversionPerformanceMonitor.getAverageMetrics();
-    const systemInfo = ConversionPerformanceMonitor.getSystemResourceInfo();
-
-    return {
-      recent: recentMetrics,
-      averages: averageMetrics,
-      system: {
-        memoryUsage: {
-          used: Math.round(systemInfo.memoryUsage.heapUsed / (1024 * 1024)), // MB
-          total: Math.round(systemInfo.memoryUsage.heapTotal / (1024 * 1024)), // MB
-          external: Math.round(systemInfo.memoryUsage.external / (1024 * 1024)), // MB
-        },
-        uptime: Math.round(systemInfo.uptime / 3600), // hours
-        cpuUsage: systemInfo.cpuUsage,
-      },
-    };
-  }),
 });
 
 export type PicturePressRouter = typeof picturePressRouter;
