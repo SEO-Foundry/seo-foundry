@@ -1,4 +1,5 @@
 import path from "path";
+import { promises as fs } from "fs";
 import { z } from "zod";
 import { createTRPCRouter, publicProcedure } from "@/server/api/trpc";
 import { TRPCError } from "@trpc/server";
@@ -22,6 +23,7 @@ import {
   isAllowedMime,
   type ConversionProgress,
 } from "@/server/lib/picture-press/session";
+import { createDirectoryZip } from "@/server/lib/shared/zip-utils";
 import {
   enforceFixedWindowLimit,
   limiterKey,
@@ -62,16 +64,38 @@ export const picturePressRouter = createTRPCRouter({
         files: z
           .array(
             z.object({
-              fileName: z.string().min(1),
-              fileData: z.string().min(1), // raw base64 (no data URL prefix)
+              fileName: z.string().min(1).max(255).refine(
+                (name) => {
+                  // Validate filename security
+                  const dangerousPatterns = [
+                    /\.\./,  // Path traversal
+                    /[<>:"|?*\x00-\x1f]/,  // Invalid filename characters
+                    /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i,  // Windows reserved names
+                  ];
+                  return !dangerousPatterns.some(pattern => pattern.test(name));
+                },
+                "Invalid filename"
+              ),
+              fileData: z.string().min(1).refine(
+                (data) => {
+                  // Validate base64 format
+                  try {
+                    const buffer = Buffer.from(data, 'base64');
+                    return buffer.length > 0 && buffer.length <= 10 * 1024 * 1024; // 10MB limit
+                  } catch {
+                    return false;
+                  }
+                },
+                "Invalid file data"
+              ),
               mimeType: z
                 .string()
                 .min(1)
                 .refine((m) => isAllowedMime(m), "Unsupported MIME type"),
             }),
           )
-          .min(1)
-          .max(50), // Limit batch size to prevent abuse
+          .min(1, "At least one file is required")
+          .max(50, "Too many files (maximum 50)"), // Limit batch size to prevent abuse
         sessionId: z.string().uuid().optional(),
       }),
     )
@@ -84,26 +108,92 @@ export const picturePressRouter = createTRPCRouter({
       if (!enforceFixedWindowLimit(rateKey, 30, 60_000)) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
-          message: "Too many uploads, please slow down.",
+          message: "Too many upload requests. Please wait a moment before trying again.",
         });
       }
       void (await maybeCleanupExpiredPicturePressessions());
 
-      // Ensure or create session
-      const sessionId = input.sessionId ?? (await createPicturePressSession()).id;
-      const sessPaths = await ensurePicturePressSession(sessionId);
+      // Enhanced validation before processing
+      const validationErrors: string[] = [];
+      
+      // Validate total payload size
+      const totalSize = input.files.reduce((sum, file) => {
+        try {
+          return sum + Buffer.from(file.fileData, 'base64').length;
+        } catch {
+          return sum;
+        }
+      }, 0);
+      
+      if (totalSize > 100 * 1024 * 1024) { // 100MB total limit
+        validationErrors.push("Total upload size exceeds 100MB limit. Please reduce the number or size of files.");
+      }
 
-      // Validate all files before processing any
-      for (const file of input.files) {
+      // Validate each file in detail
+      for (const [index, file] of input.files.entries()) {
+        const filePrefix = `File ${index + 1} (${file.fileName})`;
+        
+        // Validate MIME type
         if (!isAllowedMime(file.mimeType)) {
-          throw new TRPCError({
-            code: "BAD_REQUEST",
-            message: `Unsupported MIME type: ${file.mimeType} for file: ${file.fileName}`,
-          });
+          validationErrors.push(`${filePrefix}: Unsupported file type "${file.mimeType}". Please use JPEG, PNG, GIF, WebP, TIFF, or BMP images.`);
+          continue;
+        }
+
+        // Validate filename extension matches MIME type
+        const extension = file.fileName.toLowerCase().substring(file.fileName.lastIndexOf('.'));
+        const mimeExtensionMap: Record<string, string[]> = {
+          'image/jpeg': ['.jpg', '.jpeg'],
+          'image/jpg': ['.jpg', '.jpeg'],
+          'image/png': ['.png'],
+          'image/gif': ['.gif'],
+          'image/webp': ['.webp'],
+          'image/tiff': ['.tiff', '.tif'],
+          'image/bmp': ['.bmp']
+        };
+
+        const expectedExtensions = mimeExtensionMap[file.mimeType.toLowerCase()];
+        if (expectedExtensions && !expectedExtensions.includes(extension)) {
+          validationErrors.push(`${filePrefix}: File extension "${extension}" doesn't match MIME type "${file.mimeType}". This may indicate a security risk or corrupted file.`);
+        }
+
+        // Validate base64 data
+        try {
+          const buffer = Buffer.from(file.fileData, 'base64');
+          if (buffer.length === 0) {
+            validationErrors.push(`${filePrefix}: File appears to be empty.`);
+          } else if (buffer.length > 10 * 1024 * 1024) {
+            validationErrors.push(`${filePrefix}: File size (${(buffer.length / (1024 * 1024)).toFixed(1)}MB) exceeds 10MB limit.`);
+          } else if (buffer.length < 100) {
+            validationErrors.push(`${filePrefix}: File size (${buffer.length} bytes) is suspiciously small. This may indicate a corrupted file.`);
+          }
+        } catch {
+          validationErrors.push(`${filePrefix}: Invalid file data format.`);
         }
       }
 
-      // Persist uploads
+      if (validationErrors.length > 0) {
+        throw new TRPCError({
+          code: "BAD_REQUEST",
+          message: `Upload validation failed:\n${validationErrors.join('\n')}`,
+        });
+      }
+
+      // Ensure or create session
+      let sessionId: string;
+      let sessPaths: Awaited<ReturnType<typeof ensurePicturePressSession>>;
+      
+      try {
+        sessionId = input.sessionId ?? (await createPicturePressSession()).id;
+        sessPaths = await ensurePicturePressSession(sessionId);
+      } catch (err) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create or access session. Please try again.",
+          cause: err as Error,
+        });
+      }
+
+      // Persist uploads with enhanced error handling
       try {
         const results = await saveMultipleUploads({
           sessionId,
@@ -130,12 +220,28 @@ export const picturePressRouter = createTRPCRouter({
           totalSize: results.reduce((sum, r) => sum + r.size, 0),
         };
       } catch (err) {
+        // Provide more specific error messages based on error type
+        let errorMessage = "Upload failed due to an unexpected error.";
+        
+        if (err instanceof Error) {
+          if (err.message.includes("ENOSPC")) {
+            errorMessage = "Server storage is full. Please try again later or contact support.";
+          } else if (err.message.includes("EMFILE") || err.message.includes("ENFILE")) {
+            errorMessage = "Server is busy processing files. Please try again in a moment.";
+          } else if (err.message.includes("EACCES")) {
+            errorMessage = "Server permission error. Please contact support.";
+          } else if (err.message.includes("size") || err.message.includes("large")) {
+            errorMessage = "One or more files are too large. Please ensure all files are under 10MB.";
+          } else if (err.message.includes("MIME") || err.message.includes("type")) {
+            errorMessage = "One or more files have unsupported formats. Please use JPEG, PNG, GIF, WebP, TIFF, or BMP images.";
+          } else {
+            errorMessage = `Upload failed: ${err.message}`;
+          }
+        }
+
         throw new TRPCError({
           code: "BAD_REQUEST",
-          message:
-            err instanceof Error
-              ? err.message
-              : "Upload failed due to invalid files or size limits",
+          message: errorMessage,
           cause: err as Error,
         });
       }
@@ -178,9 +284,9 @@ export const picturePressRouter = createTRPCRouter({
           outputFormat: z.enum(["jpeg", "png", "webp", "gif", "tiff", "bmp"]),
           quality: z.number().min(1).max(100).optional(),
           namingConvention: z.enum(["keep-original", "custom-pattern"]),
-          customPattern: z.string().optional(),
-          prefix: z.string().optional(),
-          suffix: z.string().optional(),
+          customPattern: z.string().max(200).optional(),
+          prefix: z.string().max(50).optional(),
+          suffix: z.string().max(50).optional(),
         }),
       }),
     )
@@ -193,7 +299,7 @@ export const picturePressRouter = createTRPCRouter({
       if (!enforceFixedWindowLimit(rateKey, 10, 60_000)) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
-          message: "Too many conversion requests, please slow down.",
+          message: "Too many conversion requests. Please wait a moment before trying again.",
         });
       }
 
@@ -202,43 +308,97 @@ export const picturePressRouter = createTRPCRouter({
       if (!acquireLock(lockKey)) {
         throw new TRPCError({
           code: "CONFLICT",
-          message: "Conversion already in progress for this session.",
+          message: "A conversion is already in progress for this session. Please wait for it to complete.",
         });
       }
 
       try {
-        // Validate conversion options
+        // Enhanced validation of conversion options
         const validation = validateConversionOptions(input.options);
         if (!validation.valid) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: `Invalid conversion options: ${validation.errors.join(", ")}`,
+            message: `Invalid conversion settings:\n${validation.errors.join('\n')}`,
           });
         }
 
-        // Get session paths and metadata
-        const sessPaths = await ensurePicturePressSession(input.sessionId);
-        const meta = await readConversionMeta(input.sessionId);
+        // Additional security validation for naming options
+        if (input.options.customPattern) {
+          const dangerousPatterns = [
+            /\.\./,  // Path traversal
+            /[<>:"|?*\x00-\x1f]/,  // Invalid filename characters
+            /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i,  // Windows reserved names
+          ];
+          
+          for (const pattern of dangerousPatterns) {
+            if (pattern.test(input.options.customPattern)) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Custom pattern contains invalid characters. Please use only letters, numbers, underscores, and hyphens.",
+              });
+            }
+          }
+        }
+
+        // Get session paths and metadata with error handling
+        let sessPaths: Awaited<ReturnType<typeof ensurePicturePressSession>>;
+        let meta: Awaited<ReturnType<typeof readConversionMeta>>;
+        
+        try {
+          sessPaths = await ensurePicturePressSession(input.sessionId);
+          meta = await readConversionMeta(input.sessionId);
+        } catch (err) {
+          throw new TRPCError({
+            code: "NOT_FOUND",
+            message: "Session not found or has expired. Please upload your images again.",
+            cause: err as Error,
+          });
+        }
         
         if (!meta?.uploadedFiles || meta.uploadedFiles.length === 0) {
           throw new TRPCError({
             code: "BAD_REQUEST",
-            message: "No uploaded files found in session. Please upload images first.",
+            message: "No uploaded files found in this session. Please upload images first before converting.",
+          });
+        }
+
+        // Validate that uploaded files still exist
+        const missingFiles: string[] = [];
+        for (const file of meta.uploadedFiles) {
+          try {
+            await fs.access(file.tempPath);
+          } catch {
+            missingFiles.push(file.originalName);
+          }
+        }
+
+        if (missingFiles.length > 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: `Some uploaded files are no longer available: ${missingFiles.join(', ')}. Please re-upload your images.`,
           });
         }
 
         // Update session status and options
-        await updateConversionMeta(input.sessionId, {
-          status: "processing",
-          conversionOptions: input.options,
-        });
+        try {
+          await updateConversionMeta(input.sessionId, {
+            status: "processing",
+            conversionOptions: input.options,
+          });
+        } catch (err) {
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: "Failed to update session status. Please try again.",
+            cause: err as Error,
+          });
+        }
 
         // Initialize progress
         const totalFiles = meta.uploadedFiles.length;
         await writeConversionProgress(input.sessionId, {
           current: 0,
           total: totalFiles,
-          currentOperation: "Starting conversion...",
+          currentOperation: "Preparing conversion...",
           filesProcessed: 0,
           totalFiles,
         });
@@ -269,7 +429,7 @@ export const picturePressRouter = createTRPCRouter({
           });
         };
 
-        // Perform the conversion
+        // Perform the conversion with enhanced error handling
         let conversionResults: ConversionResult[];
         try {
           conversionResults = await convertImages(
@@ -278,10 +438,12 @@ export const picturePressRouter = createTRPCRouter({
             input.options as ConversionOptions,
             progressCallback,
           );
-        } catch (error) {
+        } catch (err) {
           // Update status to error
           await updateConversionMeta(input.sessionId, {
             status: "error",
+          }).catch(() => {
+            // Ignore meta update errors during error handling
           });
           
           await writeConversionProgress(input.sessionId, {
@@ -290,18 +452,60 @@ export const picturePressRouter = createTRPCRouter({
             currentOperation: "Conversion failed",
             filesProcessed: 0,
             totalFiles,
+          }).catch(() => {
+            // Ignore progress update errors during error handling
           });
+
+          // Provide specific error messages based on error type
+          let errorMessage = "Conversion failed due to an unexpected error.";
+          
+          if (err instanceof Error) {
+            if (err.message.includes("ImageMagick") || err.message.includes("magick")) {
+              errorMessage = "Image processing engine is not available. Please try again later or contact support.";
+            } else if (err.message.includes("ENOSPC")) {
+              errorMessage = "Server storage is full. Please try again later or contact support.";
+            } else if (err.message.includes("EMFILE") || err.message.includes("ENFILE")) {
+              errorMessage = "Server is busy processing files. Please try again in a moment.";
+            } else if (err.message.includes("timeout")) {
+              errorMessage = "Conversion timed out. Please try with smaller files or fewer images.";
+            } else if (err.message.includes("memory") || err.message.includes("Memory")) {
+              errorMessage = "Not enough memory to process these images. Please try with smaller files or fewer images.";
+            } else if (err.message.includes("format") || err.message.includes("corrupt")) {
+              errorMessage = "One or more images appear to be corrupted or in an unsupported format.";
+            } else {
+              errorMessage = `Conversion failed: ${err.message}`;
+            }
+          }
 
           throw new TRPCError({
             code: "INTERNAL_SERVER_ERROR",
-            message: error instanceof Error ? error.message : "Conversion failed due to an unknown error",
-            cause: error as Error,
+            message: errorMessage,
+            cause: err as Error,
           });
         }
 
         // Process results and build response
         const successfulConversions = conversionResults.filter(r => r.success);
         const failedConversions = conversionResults.filter(r => !r.success);
+
+        // If all conversions failed, provide helpful error message
+        if (successfulConversions.length === 0) {
+          const commonErrors = failedConversions.map(f => f.error).filter(Boolean);
+          const errorSummary = commonErrors.length > 0 
+            ? `All conversions failed. Common issues: ${[...new Set(commonErrors)].join(', ')}`
+            : "All conversions failed due to unknown errors.";
+          
+          await updateConversionMeta(input.sessionId, {
+            status: "error",
+          }).catch(() => {
+            // Ignore meta update errors during error handling
+          });
+
+          throw new TRPCError({
+            code: "INTERNAL_SERVER_ERROR",
+            message: errorSummary + " Please check your images and try again, or contact support if the problem persists.",
+          });
+        }
 
         // Build file URLs for successful conversions
         const convertedImages = successfulConversions.map((result) => ({
@@ -324,11 +528,12 @@ export const picturePressRouter = createTRPCRouter({
         const totalSavings = totalOriginalSize - totalConvertedSize;
 
         // Update final status
-        const finalStatus = failedConversions.length === 0 ? "completed" : 
-                           successfulConversions.length === 0 ? "error" : "completed";
+        const finalStatus = failedConversions.length === 0 ? "completed" : "completed";
         
         await updateConversionMeta(input.sessionId, {
           status: finalStatus,
+        }).catch(() => {
+          // Ignore meta update errors at this point
         });
 
         // Update final progress
@@ -337,12 +542,14 @@ export const picturePressRouter = createTRPCRouter({
           total: totalFiles,
           currentOperation: failedConversions.length === 0 
             ? "Conversion completed successfully" 
-            : `Conversion completed with ${failedConversions.length} failures`,
+            : `Conversion completed with ${failedConversions.length} failure${failedConversions.length === 1 ? '' : 's'}`,
           filesProcessed: totalFiles,
           totalFiles,
+        }).catch(() => {
+          // Ignore progress update errors at this point
         });
 
-        // Return results with error information if any conversions failed
+        // Return results with enhanced error information
         const response = {
           sessionId: input.sessionId,
           convertedImages,
@@ -353,11 +560,11 @@ export const picturePressRouter = createTRPCRouter({
           failureCount: failedConversions.length,
           failures: failedConversions.map(f => ({
             originalName: f.originalName,
-            error: f.error ?? "Unknown error",
+            error: f.error ?? "Unknown error occurred during conversion",
           })),
         };
 
-        // If there were failures but some successes, include warning in response
+        // Log partial failures for debugging
         if (failedConversions.length > 0 && successfulConversions.length > 0) {
           console.warn(`[picture-press] Partial conversion failure for session ${input.sessionId}:`, 
             failedConversions.map(f => `${f.originalName}: ${f.error}`));
@@ -367,6 +574,69 @@ export const picturePressRouter = createTRPCRouter({
 
       } finally {
         // Always release the lock
+        releaseLock(lockKey);
+      }
+    }),
+
+  // Create ZIP archive of all converted images for bulk download
+  zipConvertedImages: publicProcedure
+    .input(z.object({ sessionId: z.string().uuid() }))
+    .mutation(async ({ ctx, input }) => {
+      const rateKey = limiterKey(
+        "pp:zip",
+        ctx.headers,
+        input.sessionId,
+      );
+      if (!enforceFixedWindowLimit(rateKey, 5, 60_000)) {
+        throw new TRPCError({
+          code: "TOO_MANY_REQUESTS",
+          message: "Too many ZIP requests, please slow down.",
+        });
+      }
+
+      // Acquire concurrency lock to prevent duplicate ZIP operations
+      const lockKey = `pp:zip:${input.sessionId}`;
+      if (!acquireLock(lockKey)) {
+        throw new TRPCError({
+          code: "CONFLICT",
+          message: "ZIP creation already in progress for this session.",
+        });
+      }
+
+      try {
+        const sessPaths = await ensurePicturePressSession(input.sessionId);
+        const meta = await readConversionMeta(input.sessionId);
+        
+        if (!meta || meta.status !== "completed") {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No completed conversion found. Please convert images first.",
+          });
+        }
+
+        // Check if converted directory has files
+        const convertedFiles = await fs.readdir(sessPaths.convertedDir).catch(() => []);
+        if (convertedFiles.length === 0) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "No converted images found to ZIP.",
+          });
+        }
+
+        // Create ZIP file
+        const zipPath = path.join(sessPaths.root, "converted-images.zip");
+        await createDirectoryZip(sessPaths.convertedDir, zipPath);
+
+        // Return download URL
+        const downloadUrl = toFileUrl(input.sessionId, sessPaths.root, zipPath);
+        
+        return {
+          downloadUrl,
+          fileName: "converted-images.zip",
+          fileCount: convertedFiles.length,
+        };
+
+      } finally {
         releaseLock(lockKey);
       }
     }),

@@ -217,77 +217,221 @@ export async function saveMultipleUploads(params: {
   const { sessionId, files, maxBytes = 20 * 1024 * 1024 } = params;
 
   if (!files || files.length === 0) {
-    throw new Error("No files provided");
+    throw new Error("No files provided for upload");
   }
 
-  const sess = await ensurePicturePressSession(sessionId);
+  if (files.length > 100) {
+    throw new Error("Too many files in batch (maximum 100 files allowed)");
+  }
+
+  let sess: Awaited<ReturnType<typeof ensurePicturePressSession>>;
+  
+  try {
+    sess = await ensurePicturePressSession(sessionId);
+  } catch {
+    throw new Error(`Session not found or expired: ${sessionId}`);
+  }
+
   const results: Array<{
     savedPath: string;
     size: number;
     originalName: string;
   }> = [];
 
+  const uploadErrors: string[] = [];
+  let totalSize = 0;
+
+  // Pre-validate all files before processing any
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i]!;
+    const { fileName, base64Data, mimeType } = file;
+    const filePrefix = `File ${i + 1} (${fileName})`;
+
+    // Validate MIME type
+    if (!isPicturePressAllowedMime(mimeType)) {
+      uploadErrors.push(`${filePrefix}: Unsupported file type "${mimeType}"`);
+      continue;
+    }
+
+    // Validate filename
+    if (!fileName || fileName.trim() === "") {
+      uploadErrors.push(`${filePrefix}: Invalid or empty filename`);
+      continue;
+    }
+
+    if (fileName.length > 255) {
+      uploadErrors.push(`${filePrefix}: Filename too long (max 255 characters)`);
+      continue;
+    }
+
+    // Check for dangerous filename patterns
+    const dangerousPatterns = [
+      /\.\./,  // Path traversal
+      /[<>:"|?*\x00-\x1f]/,  // Invalid filename characters
+      /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\.|$)/i,  // Windows reserved names
+    ];
+    
+    for (const pattern of dangerousPatterns) {
+      if (pattern.test(fileName)) {
+        uploadErrors.push(`${filePrefix}: Invalid filename (contains unsafe characters or reserved names)`);
+        break;
+      }
+    }
+
+    // Validate base64 data
+    if (!base64Data || base64Data.trim() === "") {
+      uploadErrors.push(`${filePrefix}: Empty or missing file data`);
+      continue;
+    }
+
+    // Enhanced base64 validation
+    const base64Pattern = /^[a-zA-Z0-9+/]*={0,2}$/;
+    const cleanedData = base64Data.replace(/[\r\n\s]/g, '');
+    if (!base64Pattern.test(cleanedData)) {
+      uploadErrors.push(`${filePrefix}: Invalid file data format`);
+      continue;
+    }
+
+    // Validate base64 length (must be multiple of 4)
+    if (cleanedData.length % 4 !== 0) {
+      uploadErrors.push(`${filePrefix}: Corrupted file data`);
+      continue;
+    }
+
+    try {
+      const buf = Buffer.from(cleanedData, "base64");
+      
+      if (buf.byteLength === 0) {
+        uploadErrors.push(`${filePrefix}: File appears to be empty`);
+        continue;
+      }
+      
+      if (buf.byteLength > maxBytes) {
+        const sizeMB = (buf.byteLength / (1024 * 1024)).toFixed(1);
+        const maxMB = (maxBytes / (1024 * 1024)).toFixed(1);
+        uploadErrors.push(`${filePrefix}: File too large (${sizeMB}MB, max ${maxMB}MB)`);
+        continue;
+      }
+
+      if (buf.byteLength < 100) {
+        uploadErrors.push(`${filePrefix}: File too small (${buf.byteLength} bytes, minimum 100 bytes)`);
+        continue;
+      }
+
+      totalSize += buf.byteLength;
+    } catch {
+      uploadErrors.push(`${filePrefix}: Failed to decode file data`);
+      continue;
+    }
+  }
+
+  // Check total upload size
+  const maxTotalSize = 100 * 1024 * 1024; // 100MB total
+  if (totalSize > maxTotalSize) {
+    const totalMB = (totalSize / (1024 * 1024)).toFixed(1);
+    const maxTotalMB = (maxTotalSize / (1024 * 1024)).toFixed(1);
+    uploadErrors.push(`Total upload size (${totalMB}MB) exceeds limit (${maxTotalMB}MB)`);
+  }
+
+  if (uploadErrors.length > 0) {
+    throw new Error(`Upload validation failed:\n${uploadErrors.join('\n')}`);
+  }
+
   // Process each file
   for (let i = 0; i < files.length; i++) {
     const file = files[i]!;
     const { fileName, base64Data, mimeType } = file;
 
-    if (!isPicturePressAllowedMime(mimeType)) {
-      throw new Error(
-        `Unsupported MIME type: ${mimeType} for file: ${fileName}`,
+    try {
+      const cleanedData = base64Data.replace(/[\r\n\s]/g, '');
+      const buf = Buffer.from(cleanedData, "base64");
+
+      const safeNameBase = sanitizeFileName(fileName.replace(/\.[^/.]+$/, ""));
+      const ext = extForMime(mimeType) || path.extname(fileName) || "";
+      const outPath = path.join(
+        sess.uploadsDir,
+        `original-${i}-${safeNameBase}${ext}`,
       );
+
+      // Ensure the uploads directory exists
+      await fs.mkdir(sess.uploadsDir, { recursive: true });
+
+      // Write file with error handling
+      try {
+        await fs.writeFile(outPath, buf);
+      } catch (writeError) {
+        if (writeError instanceof Error) {
+          if (writeError.message.includes('ENOSPC')) {
+            throw new Error(`Not enough disk space to save ${fileName}`);
+          } else if (writeError.message.includes('EACCES')) {
+            throw new Error(`Permission denied saving ${fileName}`);
+          } else {
+            throw new Error(`Failed to save ${fileName}: ${writeError.message}`);
+          }
+        }
+        throw new Error(`Failed to save ${fileName}: Unknown error`);
+      }
+
+      // Verify the file was written correctly
+      try {
+        const stats = await fs.stat(outPath);
+        if (stats.size !== buf.byteLength) {
+          throw new Error(`File ${fileName} was not saved correctly (size mismatch)`);
+        }
+      } catch {
+        throw new Error(`Failed to verify saved file ${fileName}`);
+      }
+
+      results.push({
+        savedPath: outPath,
+        size: buf.byteLength,
+        originalName: fileName,
+      });
+
+    } catch (err) {
+      // Clean up any partially saved files
+      for (const result of results) {
+        try {
+          await fs.unlink(result.savedPath);
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+
+      const errorMessage = err instanceof Error ? err.message : `Unknown error processing ${fileName}`;
+      throw new Error(`Upload failed: ${errorMessage}`);
     }
-
-    // Check for empty base64 first
-    if (!base64Data || base64Data.trim() === "") {
-      throw new Error(`Empty file: ${fileName}`);
-    }
-
-    // Basic base64 validation
-    if (!/^[a-zA-Z0-9+/=\r\n]+$/.test(base64Data)) {
-      throw new Error(`Invalid base64 payload for file: ${fileName}`);
-    }
-
-    const buf = Buffer.from(base64Data, "base64");
-    if (buf.byteLength === 0) {
-      throw new Error(`Empty file: ${fileName}`);
-    }
-    if (buf.byteLength > maxBytes) {
-      throw new Error(`File too large: ${fileName}. Max ${maxBytes} bytes`);
-    }
-
-    const safeNameBase = sanitizeFileName(fileName.replace(/\.[^/.]+$/, ""));
-    const ext = extForMime(mimeType) || path.extname(fileName) || "";
-    const outPath = path.join(
-      sess.uploadsDir,
-      `original-${i}-${safeNameBase}${ext}`,
-    );
-
-    await fs.writeFile(outPath, buf);
-
-    results.push({
-      savedPath: outPath,
-      size: buf.byteLength,
-      originalName: fileName,
-    });
   }
 
   // Update meta with uploaded files info
-  const meta = (await readJsonSafe<ConversionSessionMeta>(sess.metaPath)) ?? {
-    id: sessionId,
-    createdAt: nowIso(),
-    expiresAt: addMsIso(24 * 60 * 60 * 1000),
-    uploadedFiles: [],
-  };
+  try {
+    const meta = (await readJsonSafe<ConversionSessionMeta>(sess.metaPath)) ?? {
+      id: sessionId,
+      createdAt: nowIso(),
+      expiresAt: addMsIso(24 * 60 * 60 * 1000),
+      uploadedFiles: [],
+    };
 
-  meta.uploadedFiles = results.map((result, index) => ({
-    originalName: result.originalName,
-    tempPath: result.savedPath,
-    mimeType: files[index]!.mimeType,
-    size: result.size,
-  }));
+    meta.uploadedFiles = results.map((result, index) => ({
+      originalName: result.originalName,
+      tempPath: result.savedPath,
+      mimeType: files[index]!.mimeType,
+      size: result.size,
+    }));
 
-  await writeJsonAtomic(sess.metaPath, meta);
+    await writeJsonAtomic(sess.metaPath, meta);
+  } catch (err) {
+    // Clean up uploaded files if meta update fails
+    for (const result of results) {
+      try {
+        await fs.unlink(result.savedPath);
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
+
+    throw new Error(`Failed to update session metadata: ${err instanceof Error ? err.message : 'Unknown error'}`);
+  }
 
   return results;
 }
@@ -404,3 +548,5 @@ export async function maybeCleanupExpiredPicturePressessions(
     return { ran: true, removed: null };
   }
 }
+
+
