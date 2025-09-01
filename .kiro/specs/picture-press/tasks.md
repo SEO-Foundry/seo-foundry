@@ -31,7 +31,7 @@
   - Write integration tests for conversion workflow
   - _Requirements: 2.1, 2.2, 2.3, 2.4, 5.5_
 
-- [ ] 5. Add progress tracking and ZIP download procedures
+- [x] 5. Add progress tracking and ZIP download procedures
   - Implement `getConversionProgress` procedure (adapt from Pixel Forge)
   - Create `zipConvertedImages` procedure for bulk downloads
   - Add session cleanup procedure (reuse existing implementation)
@@ -40,17 +40,18 @@
   - Fix all eslinter errors as the last task
   - _Requirements: 2.4, 4.4, 4.5, 5.2, 6.4_
 
-- [ ] 6. Create Picture Press options sidebar component
-  - Implement `src/app/_components/PicturePressOptions.tsx` based on SidebarOptions
+- [x] 6. Create Picture Press options sidebar component
+  - Implement `src/app/_components/PicturePressOptions.tsx` based on SidebarOptions. Try to mimic the styling of pixel-forge's sidebar
   - Add format selection UI with support for JPEG, PNG, WebP, GIF, TIFF, BMP
   - Implement quality slider for lossy formats
-  - Create naming convention selection (keep original vs custom pattern)
+  - Make sure the quality slider only shows up for lossy formats
+  - Create naming convention selection (keep original vs custom pattern with text input that would replace the old names)
   - Add custom pattern input with preview functionality
   - Write component tests for option selection and validation
   - Fix all eslinter errors as the last task
   - _Requirements: 2.1, 3.1, 3.2, 3.3, 6.2_
 
-- [ ] 7. Adapt upload area component for multi-file support
+- [x] 7. Adapt upload area component for multi-file support
   - Modify existing UploadArea component to handle multiple file selection
   - Add batch upload progress display
   - Implement individual file validation feedback
@@ -60,7 +61,7 @@
   - Fix all eslinter errors as the last task
   - _Requirements: 1.1, 1.2, 1.3, 1.5, 6.2_
 
-- [ ] 8. Adapt result grid component for conversion results
+- [x] 8. Adapt result grid component for conversion results
   - Create `ConvertedImageItem` type for conversion results
   - Modify ResultGrid to show before/after comparison
   - Display conversion statistics (original size, converted size, savings)
@@ -70,7 +71,7 @@
   - Fix all eslinter errors as the last task
   - _Requirements: 4.1, 4.2, 4.3, 4.4, 6.2_
 
-- [ ] 9. Create Picture Press main page component
+- [x] 9. Create Picture Press main page component
   - Implement `src/app/picture-press/page.tsx` with complete workflow
   - Integrate upload area, options sidebar, and result grid components
   - Add tRPC hooks for session management and conversion operations
@@ -80,7 +81,7 @@
   - Fix all eslinter errors as the last task
   - _Requirements: 1.1, 2.1, 4.1, 4.2, 6.2_
 
-- [ ] 10. Add Picture Press router to main tRPC router
+- [x] 10. Add Picture Press router to main tRPC router
   - Import and integrate `picturePressRouter` in `src/server/api/root.ts`
   - Ensure proper type exports for client-side usage
   - Add Picture Press to navigation or main page links
@@ -88,16 +89,15 @@
   - Fix all eslinter errors as the last task
   - _Requirements: 6.1, 6.4_
 
-- [ ] 11. Implement comprehensive error handling and validation
+- [x] 11. Implement comprehensive error handling and validation
   - Add client-side file validation before upload
   - Implement server-side security validation using existing patterns
   - Add graceful error handling for conversion failures
   - Create user-friendly error messages and recovery suggestions
-  - Write tests for error scenarios and edge cases
   - Fix all eslinter errors as the last task
   - _Requirements: 1.5, 5.1, 5.2, 5.3, 5.4_
 
-- [ ] 12. Add security and rate limiting integration
+- [x] 12. Add security and rate limiting integration
   - Apply existing rate limiting patterns to all Picture Press procedures
   - Implement per-session concurrency locks for conversion operations
   - Add file serving security using existing secure route patterns
