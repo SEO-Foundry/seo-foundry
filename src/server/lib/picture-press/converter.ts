@@ -3,165 +3,6 @@ import path from "path";
 import { ImageProcessor } from "pixel-forge";
 import { ensureImageEngine } from "../pixel-forge/deps";
 
-// Performance monitoring interfaces
-export interface ConversionMetrics {
-  startTime: number;
-  endTime?: number;
-  totalDuration?: number;
-  filesProcessed: number;
-  totalFiles: number;
-  averageTimePerFile?: number;
-  peakMemoryUsage?: number;
-  totalOriginalSize: number;
-  totalConvertedSize: number;
-  compressionRatio?: number;
-  errors: number;
-  engineUsed?: string;
-}
-
-export interface BatchProcessingOptions {
-  maxConcurrency?: number;
-  memoryThreshold?: number; // MB
-  progressGranularity?: number; // Report progress every N files
-  enableMemoryMonitoring?: boolean;
-  timeoutPerFile?: number; // seconds
-}
-
-// Memory monitoring utilities
-class MemoryMonitor {
-  private peakUsage = 0;
-  private monitoringInterval?: NodeJS.Timeout;
-  private isMonitoring = false;
-
-  startMonitoring(intervalMs = 1000): void {
-    if (this.isMonitoring) return;
-    
-    this.isMonitoring = true;
-    this.peakUsage = 0;
-    
-    this.monitoringInterval = setInterval(() => {
-      const usage = process.memoryUsage();
-      const currentUsageMB = usage.heapUsed / (1024 * 1024);
-      
-      if (currentUsageMB > this.peakUsage) {
-        this.peakUsage = currentUsageMB;
-      }
-    }, intervalMs);
-  }
-
-  stopMonitoring(): number {
-    if (this.monitoringInterval) {
-      clearInterval(this.monitoringInterval);
-      this.monitoringInterval = undefined;
-    }
-    this.isMonitoring = false;
-    return this.peakUsage;
-  }
-
-  getCurrentUsageMB(): number {
-    const usage = process.memoryUsage();
-    return usage.heapUsed / (1024 * 1024);
-  }
-
-  getPeakUsageMB(): number {
-    return this.peakUsage;
-  }
-
-  checkMemoryThreshold(thresholdMB: number): boolean {
-    return this.getCurrentUsageMB() > thresholdMB;
-  }
-}
-
-// Batch processing queue for optimized concurrent processing
-class BatchProcessor {
-  private queue: Array<() => Promise<ConversionResult>> = [];
-  private running = 0;
-  private maxConcurrency: number;
-  private memoryMonitor: MemoryMonitor;
-  private memoryThreshold: number;
-
-  constructor(maxConcurrency = 3, memoryThresholdMB = 512) {
-    this.maxConcurrency = maxConcurrency;
-    this.memoryThreshold = memoryThresholdMB;
-    this.memoryMonitor = new MemoryMonitor();
-  }
-
-  async processAll<T>(
-    tasks: Array<() => Promise<T>>,
-    progressCallback?: (completed: number, total: number) => void
-  ): Promise<T[]> {
-    const results: T[] = [];
-    const total = tasks.length;
-    let completed = 0;
-
-    this.memoryMonitor.startMonitoring();
-
-    return new Promise((resolve, _reject) => {
-      const processNext = () => {
-        // Check memory threshold before starting new tasks
-        if (this.memoryMonitor.checkMemoryThreshold(this.memoryThreshold)) {
-          // Force garbage collection if available
-          if (global.gc) {
-            global.gc();
-          }
-          
-          // If still over threshold, reduce concurrency temporarily
-          if (this.memoryMonitor.checkMemoryThreshold(this.memoryThreshold)) {
-            this.maxConcurrency = Math.max(1, Math.floor(this.maxConcurrency / 2));
-          }
-        }
-
-        while (this.running < this.maxConcurrency && tasks.length > 0) {
-          const task = tasks.shift();
-          if (!task) break;
-
-          this.running++;
-          
-          task()
-            .then((result) => {
-              results.push(result);
-              completed++;
-              progressCallback?.(completed, total);
-            })
-            .catch((error) => {
-              // Store error as result to maintain order
-              results.push(error as T);
-              completed++;
-              progressCallback?.(completed, total);
-            })
-            .finally(() => {
-              this.running--;
-              
-              if (completed === total) {
-                this.memoryMonitor.stopMonitoring();
-                resolve(results);
-              } else {
-                processNext();
-              }
-            });
-        }
-
-        if (this.running === 0 && tasks.length === 0 && completed === total) {
-          this.memoryMonitor.stopMonitoring();
-          resolve(results);
-        }
-      };
-
-      if (tasks.length === 0) {
-        this.memoryMonitor.stopMonitoring();
-        resolve(results);
-        return;
-      }
-
-      processNext();
-    });
-  }
-
-  getPeakMemoryUsage(): number {
-    return this.memoryMonitor.getPeakUsageMB();
-  }
-}
-
 export interface ConversionOptions {
   outputFormat: "jpeg" | "png" | "webp" | "gif" | "tiff" | "bmp";
   quality?: number;
@@ -309,7 +150,7 @@ async function getImageDimensions(
 }
 
 /**
- * Convert a single image file with enhanced error handling
+ * Convert a single image file
  */
 async function convertSingleImage(
   inputPath: string,
@@ -355,7 +196,7 @@ async function convertSingleImage(
     // Ensure output directory exists
     await fs.mkdir(outputDir, { recursive: true });
 
-    // Create ImageProcessor instance with error handling
+    // Create ImageProcessor instance
     try {
       processor = new ImageProcessor(inputPath);
     } catch (error) {
@@ -381,13 +222,8 @@ async function convertSingleImage(
       saveOptions.quality = quality;
     }
 
-    // Perform conversion with timeout
-    const conversionPromise = processor.save(outputPath, saveOptions);
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error("Conversion timeout after 30 seconds")), 30000);
-    });
-
-    await Promise.race([conversionPromise, timeoutPromise]);
+    // Perform conversion
+    await processor.save(outputPath, saveOptions);
 
     // Verify output file was created and has content
     try {
@@ -454,7 +290,7 @@ async function convertSingleImage(
 }
 
 /**
- * Convert multiple images with optimized batch processing, memory monitoring, and performance metrics
+ * Convert multiple images sequentially with progress reporting
  */
 export async function convertImages(
   inputFiles: string[],
@@ -466,26 +302,7 @@ export async function convertImages(
     operation: string,
     currentFile?: string,
   ) => void,
-  batchOptions: BatchProcessingOptions = {},
 ): Promise<ConversionResult[]> {
-  // Initialize performance metrics
-  const metrics: ConversionMetrics = {
-    startTime: Date.now(),
-    filesProcessed: 0,
-    totalFiles: inputFiles.length,
-    totalOriginalSize: 0,
-    totalConvertedSize: 0,
-    errors: 0,
-  };
-
-  // Set default batch processing options
-  const {
-    maxConcurrency = Math.min(3, Math.max(1, Math.floor(inputFiles.length / 4))),
-    memoryThreshold = 512, // 512MB
-    progressGranularity = Math.max(1, Math.floor(inputFiles.length / 20)), // Report every 5%
-    timeoutPerFile = 30,
-  } = batchOptions;
-
   if (!inputFiles || inputFiles.length === 0) {
     throw new Error("No input files provided for conversion");
   }
@@ -508,30 +325,11 @@ export async function convertImages(
     throw new Error(`Input files not found or not accessible: ${missingFiles.join(', ')}`);
   }
 
-  // Ensure ImageMagick engine is available and record which engine is used
+  // Ensure ImageMagick engine is available
   try {
     await ensureImageEngine();
-    // Try to detect which engine is being used
-    try {
-      const { execFile } = await import("child_process");
-      const { promisify } = await import("util");
-      const execFileAsync = promisify(execFile);
-      
-      try {
-        await execFileAsync("magick", ["-version"]);
-        metrics.engineUsed = "ImageMagick";
-      } catch {
-        try {
-          await execFileAsync("convert", ["-version"]);
-          metrics.engineUsed = "ImageMagick (legacy)";
-        } catch {
-          metrics.engineUsed = "Jimp (fallback)";
-        }
-      }
-    } catch {
-      metrics.engineUsed = "Unknown";
-    }
   } catch (error) {
+    console.error('[picture-press] Engine setup failed:', error);
     throw new Error(`Image processing engine not available: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 
@@ -547,140 +345,64 @@ export async function convertImages(
   }
 
   const total = inputFiles.length;
+  const results: ConversionResult[] = [];
 
-  let successCount = 0;
-  let failureCount = 0;
+  progressCallback?.(0, total, "Initializing conversion...");
+  
+  console.log(`[picture-press] Starting conversion: ${total} files`);
 
-  progressCallback?.(0, total, "Initializing optimized batch conversion...");
+  // Process files sequentially
+  for (let i = 0; i < inputFiles.length; i++) {
+    const inputFile = inputFiles[i];
+    if (!inputFile) continue;
 
-  // Create batch processor with memory monitoring
-  const batchProcessor = new BatchProcessor(maxConcurrency, memoryThreshold);
+    const originalName = path.basename(inputFile);
+    
+    progressCallback?.(i, total, `Converting ${originalName}...`, originalName);
 
-  // Create conversion tasks
-  const conversionTasks = inputFiles.map((inputFile, index) => {
-    return async (): Promise<ConversionResult> => {
-      const originalName = path.basename(inputFile);
+    try {
+      // Generate output filename
+      const baseOutputName = generateOutputFilename(
+        inputFile,
+        options.outputFormat,
+        options,
+        i,
+      );
+      const uniqueOutputName = await ensureUniqueFilename(
+        outputDir,
+        baseOutputName,
+      );
 
+      // Get original file info
+      const originalSize = await getFileSize(inputFile);
+      const originalDimensions = await getImageDimensions(inputFile);
 
-      try {
-        // Generate output filename with error handling
-        let baseOutputName: string;
-        let uniqueOutputName: string;
-        
-        try {
-          baseOutputName = generateOutputFilename(
-            inputFile,
-            options.outputFormat,
-            options,
-            index,
-          );
-          uniqueOutputName = await ensureUniqueFilename(
-            outputDir,
-            baseOutputName,
-          );
-        } catch (error) {
-          metrics.errors++;
-          return {
-            originalFile: inputFile,
-            convertedFile: "",
-            originalName,
-            convertedName: "",
-            originalSize: await getFileSize(inputFile),
-            convertedSize: 0,
-            success: false,
-            error: `Failed to generate output filename: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          };
-        }
+      // Convert the image
+      const conversionResult = await convertSingleImage(
+        inputFile,
+        outputDir,
+        uniqueOutputName,
+        options,
+      );
 
-        // Get original file info with error handling
-        let originalSize: number;
-        let originalDimensions: { width?: number; height?: number };
-        
-        try {
-          originalSize = await getFileSize(inputFile);
-          originalDimensions = await getImageDimensions(inputFile);
-          metrics.totalOriginalSize += originalSize;
-        } catch (error) {
-          metrics.errors++;
-          return {
-            originalFile: inputFile,
-            convertedFile: "",
-            originalName,
-            convertedName: "",
-            originalSize: 0,
-            convertedSize: 0,
-            success: false,
-            error: `Failed to read original file info: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          };
-        }
+      if (conversionResult.success && conversionResult.outputPath) {
+        // Get converted file info
+        const convertedSize = await getFileSize(conversionResult.outputPath);
+        const convertedDimensions = await getImageDimensions(conversionResult.outputPath);
 
-        // Convert the image with timeout
-        const conversionPromise = convertSingleImage(
-          inputFile,
-          outputDir,
-          uniqueOutputName,
-          options,
-        );
-
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error(`File conversion timeout after ${timeoutPerFile} seconds`)), timeoutPerFile * 1000);
+        results.push({
+          originalFile: inputFile,
+          convertedFile: conversionResult.outputPath,
+          originalName,
+          convertedName: uniqueOutputName,
+          originalSize,
+          convertedSize,
+          width: convertedDimensions.width ?? originalDimensions.width,
+          height: convertedDimensions.height ?? originalDimensions.height,
+          success: true,
         });
-
-        const conversionResult = await Promise.race([conversionPromise, timeoutPromise]);
-
-        if (conversionResult.success && conversionResult.outputPath) {
-          // Get converted file info
-          let convertedSize: number;
-          let convertedDimensions: { width?: number; height?: number };
-          
-          try {
-            convertedSize = await getFileSize(conversionResult.outputPath);
-            convertedDimensions = await getImageDimensions(conversionResult.outputPath);
-            metrics.totalConvertedSize += convertedSize;
-          } catch (error) {
-            metrics.errors++;
-            return {
-              originalFile: inputFile,
-              convertedFile: "",
-              originalName,
-              convertedName: "",
-              originalSize,
-              convertedSize: 0,
-              success: false,
-              error: `Conversion produced invalid output: ${error instanceof Error ? error.message : 'Unknown error'}`,
-            };
-          }
-
-          return {
-            originalFile: inputFile,
-            convertedFile: conversionResult.outputPath,
-            originalName,
-            convertedName: uniqueOutputName,
-            originalSize,
-            convertedSize,
-            width: convertedDimensions.width ?? originalDimensions.width,
-            height: convertedDimensions.height ?? originalDimensions.height,
-            success: true,
-          };
-        } else {
-          metrics.errors++;
-          return {
-            originalFile: inputFile,
-            convertedFile: "",
-            originalName,
-            convertedName: "",
-            originalSize,
-            convertedSize: 0,
-            success: false,
-            error: conversionResult.error ?? "Conversion failed for unknown reason",
-          };
-        }
-      } catch (error) {
-        metrics.errors++;
-        const originalSize = await getFileSize(inputFile).catch(() => 0);
-        metrics.totalOriginalSize += originalSize;
-        
-        return {
+      } else {
+        results.push({
           originalFile: inputFile,
           convertedFile: "",
           originalName,
@@ -688,62 +410,37 @@ export async function convertImages(
           originalSize,
           convertedSize: 0,
           success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
+          error: conversionResult.error ?? "Conversion failed for unknown reason",
+        });
       }
-    };
-  });
-
-  // Process all conversions with optimized batching
-  const results = await batchProcessor.processAll(
-    conversionTasks,
-    (completed, total) => {
-      // Track completion progress
+    } catch (error) {
+      const originalSize = await getFileSize(inputFile).catch(() => 0);
       
-      // Update metrics
-      metrics.filesProcessed = completed;
-      
-      // Count successes and failures
-      const currentResults = results.slice(0, completed);
-      successCount = currentResults.filter(r => r.success).length;
-      failureCount = currentResults.filter(r => !r.success).length;
-
-      // Report progress at specified granularity
-      if (completed % progressGranularity === 0 || completed === total) {
-        const progressMessage = failureCount > 0 
-          ? `Converting images (${successCount} successful, ${failureCount} failed)`
-          : `Converting images (${successCount} completed)`;
-        
-        progressCallback?.(completed, total, progressMessage);
-      }
+      results.push({
+        originalFile: inputFile,
+        convertedFile: "",
+        originalName,
+        convertedName: "",
+        originalSize,
+        convertedSize: 0,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-  );
 
-  // Finalize metrics
-  metrics.endTime = Date.now();
-  metrics.totalDuration = metrics.endTime - metrics.startTime;
-  metrics.averageTimePerFile = metrics.totalDuration / metrics.totalFiles;
-  metrics.peakMemoryUsage = batchProcessor.getPeakMemoryUsage();
-  
-  if (metrics.totalOriginalSize > 0) {
-    metrics.compressionRatio = ((metrics.totalOriginalSize - metrics.totalConvertedSize) / metrics.totalOriginalSize) * 100;
+    // Report progress
+    progressCallback?.(i + 1, total, `Converted ${i + 1}/${total} images`);
   }
 
-  // Log performance metrics for monitoring
-  console.log(`[picture-press] Conversion metrics:`, {
-    duration: `${(metrics.totalDuration / 1000).toFixed(2)}s`,
-    avgTimePerFile: `${(metrics.averageTimePerFile / 1000).toFixed(2)}s`,
-    peakMemory: `${metrics.peakMemoryUsage?.toFixed(1)}MB`,
-    compressionRatio: `${metrics.compressionRatio?.toFixed(1)}%`,
-    engine: metrics.engineUsed,
-    concurrency: maxConcurrency,
-    successRate: `${((successCount / total) * 100).toFixed(1)}%`,
-  });
+  const successCount = results.filter(r => r.success).length;
+  const failureCount = results.filter(r => !r.success).length;
 
-  // Final progress update with performance info
+  console.log(`[picture-press] Conversion completed: ${successCount} successful, ${failureCount} failed`);
+
+  // Final progress update
   const finalMessage = failureCount === 0 
-    ? `Conversion completed successfully (${successCount} images in ${(metrics.totalDuration / 1000).toFixed(1)}s)`
-    : `Conversion completed with ${failureCount} failure${failureCount === 1 ? '' : 's'} (${successCount} successful in ${(metrics.totalDuration / 1000).toFixed(1)}s)`;
+    ? `Conversion completed successfully (${successCount} images)`
+    : `Conversion completed with ${failureCount} failure${failureCount === 1 ? '' : 's'} (${successCount} successful)`;
   
   progressCallback?.(total, total, finalMessage);
 
@@ -762,7 +459,7 @@ export async function convertImages(
 }
 
 /**
- * Validate conversion options with comprehensive checks
+ * Validate conversion options
  */
 export function validateConversionOptions(options: ConversionOptions): {
   valid: boolean;
@@ -867,15 +564,6 @@ export function validateConversionOptions(options: ConversionOptions): {
     }
   }
 
-  // Additional validation for edge cases
-  if (options.outputFormat === "gif" && options.quality) {
-    errors.push("GIF format does not support quality settings (GIF uses lossless compression)");
-  }
-
-  if (options.outputFormat === "bmp" && options.quality) {
-    errors.push("BMP format does not support quality settings (BMP is uncompressed)");
-  }
-
   return {
     valid: errors.length === 0,
     errors,
@@ -898,221 +586,4 @@ export function getSupportedFormats(): Array<{
     { format: "tiff", label: "TIFF", supportsQuality: false },
     { format: "bmp", label: "BMP", supportsQuality: false },
   ];
-}
-
-/**
- * Performance monitoring utilities for conversion operations
- */
-export class ConversionPerformanceMonitor {
-  private static metrics: ConversionMetrics[] = [];
-  private static readonly MAX_STORED_METRICS = 100;
-
-  static recordMetrics(metrics: ConversionMetrics): void {
-    this.metrics.push(metrics);
-    
-    // Keep only the most recent metrics to prevent memory leaks
-    if (this.metrics.length > this.MAX_STORED_METRICS) {
-      this.metrics = this.metrics.slice(-this.MAX_STORED_METRICS);
-    }
-  }
-
-  static getRecentMetrics(count = 10): ConversionMetrics[] {
-    return this.metrics.slice(-count);
-  }
-
-  static getAverageMetrics(): {
-    averageDuration: number;
-    averageTimePerFile: number;
-    averageMemoryUsage: number;
-    averageCompressionRatio: number;
-    averageSuccessRate: number;
-    totalConversions: number;
-  } {
-    if (this.metrics.length === 0) {
-      return {
-        averageDuration: 0,
-        averageTimePerFile: 0,
-        averageMemoryUsage: 0,
-        averageCompressionRatio: 0,
-        averageSuccessRate: 0,
-        totalConversions: 0,
-      };
-    }
-
-    const validMetrics = this.metrics.filter(m => m.totalDuration && m.averageTimePerFile);
-    
-    if (validMetrics.length === 0) {
-      return {
-        averageDuration: 0,
-        averageTimePerFile: 0,
-        averageMemoryUsage: 0,
-        averageCompressionRatio: 0,
-        averageSuccessRate: 0,
-        totalConversions: 0,
-      };
-    }
-
-    const totalConversions = this.metrics.reduce((sum, m) => sum + m.totalFiles, 0);
-    const totalSuccessful = this.metrics.reduce((sum, m) => sum + (m.totalFiles - m.errors), 0);
-
-    return {
-      averageDuration: validMetrics.reduce((sum, m) => sum + m.totalDuration!, 0) / validMetrics.length,
-      averageTimePerFile: validMetrics.reduce((sum, m) => sum + m.averageTimePerFile!, 0) / validMetrics.length,
-      averageMemoryUsage: validMetrics
-        .filter(m => m.peakMemoryUsage)
-        .reduce((sum, m) => sum + m.peakMemoryUsage!, 0) / validMetrics.filter(m => m.peakMemoryUsage).length || 0,
-      averageCompressionRatio: validMetrics
-        .filter(m => m.compressionRatio)
-        .reduce((sum, m) => sum + m.compressionRatio!, 0) / validMetrics.filter(m => m.compressionRatio).length || 0,
-      averageSuccessRate: totalConversions > 0 ? (totalSuccessful / totalConversions) * 100 : 0,
-      totalConversions,
-    };
-  }
-
-  static clearMetrics(): void {
-    this.metrics = [];
-  }
-
-  static getSystemResourceInfo(): {
-    memoryUsage: NodeJS.MemoryUsage;
-    uptime: number;
-    cpuUsage: NodeJS.CpuUsage;
-  } {
-    return {
-      memoryUsage: process.memoryUsage(),
-      uptime: process.uptime(),
-      cpuUsage: process.cpuUsage(),
-    };
-  }
-}
-
-/**
- * Optimized conversion function with performance monitoring
- */
-export async function convertImagesWithMonitoring(
-  inputFiles: string[],
-  outputDir: string,
-  options: ConversionOptions,
-  progressCallback?: (
-    current: number,
-    total: number,
-    operation: string,
-    currentFile?: string,
-  ) => void,
-  batchOptions: BatchProcessingOptions = {},
-): Promise<{
-  results: ConversionResult[];
-  metrics: ConversionMetrics;
-}> {
-  const results = await convertImages(
-    inputFiles,
-    outputDir,
-    options,
-    progressCallback,
-    batchOptions,
-  );
-
-  // Extract metrics from the conversion process
-  // Note: In a real implementation, we'd need to modify convertImages to return metrics
-  // For now, we'll create basic metrics
-  const metrics: ConversionMetrics = {
-    startTime: Date.now() - 1000, // Approximate
-    endTime: Date.now(),
-    totalDuration: 1000, // Approximate
-    filesProcessed: results.length,
-    totalFiles: inputFiles.length,
-    averageTimePerFile: 1000 / results.length,
-    totalOriginalSize: results.reduce((sum, r) => sum + r.originalSize, 0),
-    totalConvertedSize: results.reduce((sum, r) => sum + r.convertedSize, 0),
-    errors: results.filter(r => !r.success).length,
-  };
-
-  if (metrics.totalOriginalSize > 0) {
-    metrics.compressionRatio = ((metrics.totalOriginalSize - metrics.totalConvertedSize) / metrics.totalOriginalSize) * 100;
-  }
-
-  // Record metrics for monitoring
-  ConversionPerformanceMonitor.recordMetrics(metrics);
-
-  return { results, metrics };
-}
-
-/**
- * Benchmark conversion performance with different settings
- */
-export async function benchmarkConversion(
-  testFiles: string[],
-  outputDir: string,
-  options: ConversionOptions,
-): Promise<{
-  concurrencyBenchmarks: Array<{
-    concurrency: number;
-    duration: number;
-    memoryUsage: number;
-    successRate: number;
-  }>;
-  recommendedConcurrency: number;
-}> {
-  const concurrencyLevels = [1, 2, 3, 4, 6, 8];
-  const benchmarks: Array<{
-    concurrency: number;
-    duration: number;
-    memoryUsage: number;
-    successRate: number;
-  }> = [];
-
-  for (const concurrency of concurrencyLevels) {
-    const startTime = Date.now();
-    const memoryBefore = process.memoryUsage().heapUsed;
-
-    try {
-      const results = await convertImages(
-        testFiles,
-        outputDir,
-        options,
-        undefined,
-        { maxConcurrency: concurrency, enableMemoryMonitoring: true }
-      );
-
-      const duration = Date.now() - startTime;
-      const memoryAfter = process.memoryUsage().heapUsed;
-      const memoryUsage = (memoryAfter - memoryBefore) / (1024 * 1024); // MB
-      const successRate = (results.filter(r => r.success).length / results.length) * 100;
-
-      benchmarks.push({
-        concurrency,
-        duration,
-        memoryUsage,
-        successRate,
-      });
-
-      // Clean up converted files for next test
-      await fs.rmdir(outputDir, { recursive: true }).catch(() => {
-        // Ignore cleanup errors
-      });
-      await fs.mkdir(outputDir, { recursive: true });
-
-    } catch (error) {
-      console.warn(`Benchmark failed for concurrency ${concurrency}:`, error);
-      benchmarks.push({
-        concurrency,
-        duration: Infinity,
-        memoryUsage: Infinity,
-        successRate: 0,
-      });
-    }
-  }
-
-  // Find optimal concurrency (best duration with acceptable memory usage)
-  const validBenchmarks = benchmarks.filter(b => b.duration !== Infinity && b.successRate > 90);
-  const recommendedConcurrency = validBenchmarks.length > 0
-    ? validBenchmarks.reduce((best, current) => 
-        current.duration < best.duration && current.memoryUsage < 1000 ? current : best
-      ).concurrency
-    : 3; // Default fallback
-
-  return {
-    concurrencyBenchmarks: benchmarks,
-    recommendedConcurrency,
-  };
 }

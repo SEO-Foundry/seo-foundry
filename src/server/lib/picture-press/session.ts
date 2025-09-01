@@ -116,6 +116,9 @@ async function pathExists(p: string): Promise<boolean> {
 }
 
 async function writeJsonAtomic(p: string, data: unknown): Promise<void> {
+  // Ensure the directory exists before writing
+  await fs.mkdir(path.dirname(p), { recursive: true });
+  
   const tmp = p + ".tmp";
   await fs.writeFile(tmp, JSON.stringify(data, null, 2), "utf8");
   await fs.rename(tmp, p);
