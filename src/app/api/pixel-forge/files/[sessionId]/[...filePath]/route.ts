@@ -5,7 +5,6 @@ import { ensureSession } from "@/server/lib/pixel-forge/session";
 
 export const runtime = "nodejs";
 
-
 function makeETag(size: number, mtimeMs: number): string {
   // Weak ETag: size-mtime fingerprint
   return `W/"${size.toString(16)}-${Math.floor(mtimeMs).toString(16)}"`;
@@ -59,7 +58,10 @@ export async function GET(
     const normalized = path.normalize(joined);
 
     // Ensure the resolved path stays within the session root
-    if (!normalized.startsWith(sess.root + path.sep) && normalized !== sess.root) {
+    if (
+      !normalized.startsWith(sess.root + path.sep) &&
+      normalized !== sess.root
+    ) {
       return new Response("Forbidden", { status: 403 });
     }
 
@@ -87,7 +89,10 @@ export async function GET(
     const data = await fs.readFile(normalized);
     headers.set("Content-Length", String(data.byteLength));
     if (ct === "application/zip") {
-      headers.set("Content-Disposition", `attachment; filename="${path.basename(normalized)}"`);
+      headers.set(
+        "Content-Disposition",
+        `attachment; filename="${path.basename(normalized)}"`,
+      );
     }
 
     // Buffer is not typed as BodyInit in TS; wrap as Uint8Array for Response

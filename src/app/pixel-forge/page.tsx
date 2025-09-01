@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import SidebarOptions, { type PixelForgeSelections } from "@/app/_components/SidebarOptions";
+import SidebarOptions, {
+  type PixelForgeSelections,
+} from "@/app/_components/SidebarOptions";
 import UploadArea from "@/app/_components/UploadArea";
 import ResultGrid from "@/app/_components/ResultGrid";
 import { api } from "@/trpc/react";
@@ -40,10 +42,9 @@ const DEFAULT_SELECTIONS: PixelForgeSelections = {
   urlPrefix: "",
 };
 
-
-
 export default function Page() {
-  const [selections, setSelections] = useState<PixelForgeSelections>(DEFAULT_SELECTIONS);
+  const [selections, setSelections] =
+    useState<PixelForgeSelections>(DEFAULT_SELECTIONS);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [variants, setVariants] = useState<VariantItem[]>([]);
@@ -59,41 +60,51 @@ export default function Page() {
   const generateAssetsMutation = api.pixelForge.generateAssets.useMutation();
   const zipAssetsMutation = api.pixelForge.zipAssets.useMutation();
 
-// Progress polling for generation
-const sid = sessionId ?? "00000000-0000-0000-0000-000000000000";
-const progressQuery = api.pixelForge.getGenerationProgress.useQuery(
-  { sessionId: sid },
-  { enabled: generating && !!sessionId, refetchInterval: generating ? 600 : false }
-);
-const progressData = progressQuery.data;
-const progressTotal = progressData?.total ?? 100;
-const progressCurrent = progressData?.current ?? 0;
-const progressPct =
-  progressTotal > 0 ? Math.min(100, Math.round((progressCurrent / progressTotal) * 100)) : 0;
-const progressOp = progressData?.currentOperation ?? "Working...";
+  // Progress polling for generation
+  const sid = sessionId ?? "00000000-0000-0000-0000-000000000000";
+  const progressQuery = api.pixelForge.getGenerationProgress.useQuery(
+    { sessionId: sid },
+    {
+      enabled: generating && !!sessionId,
+      refetchInterval: generating ? 600 : false,
+    },
+  );
+  const progressData = progressQuery.data;
+  const progressTotal = progressData?.total ?? 100;
+  const progressCurrent = progressData?.current ?? 0;
+  const progressPct =
+    progressTotal > 0
+      ? Math.min(100, Math.round((progressCurrent / progressTotal) * 100))
+      : 0;
+  const progressOp = progressData?.currentOperation ?? "Working...";
   const canGenerate = useMemo(() => {
     return !!sessionId && !!storedPath;
   }, [sessionId, storedPath]);
 
-  const onUpload = useCallback(async (file: File, dataUrl: string) => {
-    try {
-      setErrorMsg(null);
-      const base64 = dataUrl.split(",")[1] ?? "";
-      const res = await uploadImage.mutateAsync({
-        fileName: file.name,
-        fileData: base64,
-        mimeType: file.type || "image/png",
-        sessionId: sessionId ?? undefined,
-      });
-      setSessionId(res.sessionId);
-      setStoredPath(res.storedPath);
-      setSourceUrl(res.previewUrl);
-      setVariants([]);
-    } catch (err) {
-      console.error("[pixel-forge] upload failed", err);
-      setErrorMsg(readableError(err, "Upload failed. Please check file type and size."));
-    }
-  }, [uploadImage, sessionId]);
+  const onUpload = useCallback(
+    async (file: File, dataUrl: string) => {
+      try {
+        setErrorMsg(null);
+        const base64 = dataUrl.split(",")[1] ?? "";
+        const res = await uploadImage.mutateAsync({
+          fileName: file.name,
+          fileData: base64,
+          mimeType: file.type || "image/png",
+          sessionId: sessionId ?? undefined,
+        });
+        setSessionId(res.sessionId);
+        setStoredPath(res.storedPath);
+        setSourceUrl(res.previewUrl);
+        setVariants([]);
+      } catch (err) {
+        console.error("[pixel-forge] upload failed", err);
+        setErrorMsg(
+          readableError(err, "Upload failed. Please check file type and size."),
+        );
+      }
+    },
+    [uploadImage, sessionId],
+  );
 
   const onClearUpload = useCallback(async () => {
     try {
@@ -129,7 +140,9 @@ const progressOp = progressData?.currentOperation ?? "Working...";
         imagePath: storedPath,
         options: {
           generationTypes:
-            (selections.generationTypes?.length ?? 0) > 0 ? selections.generationTypes : ["all"],
+            (selections.generationTypes?.length ?? 0) > 0
+              ? selections.generationTypes
+              : ["all"],
           transparent: Boolean(selections.transparent),
           appName: selections.appName ?? undefined,
           description: selections.description ?? undefined,
@@ -141,30 +154,37 @@ const progressOp = progressData?.currentOperation ?? "Working...";
         },
       });
 
-      const newVariants: VariantItem[] = (res.assets as ServerAsset[]).map((a: ServerAsset) => {
-        const ext = a.fileName.split(".").pop()?.toUpperCase() ?? "PNG";
-        const re = /(\d{2,4})x(\d{2,4})/;
-        const dimsMatch = re.exec(a.fileName);
-        const dimStr = dimsMatch ? `${dimsMatch[1]}x${dimsMatch[2]}` : "";
-        return {
-          id: `${a.category}-${a.fileName}`,
-          url: a.previewUrl ?? a.downloadUrl,
-          filename: a.fileName,
-          meta: {
-            size: dimStr || a.category,
-            style: a.category,
-            format: ext,
-          },
-        };
-      });
+      const newVariants: VariantItem[] = (res.assets as ServerAsset[]).map(
+        (a: ServerAsset) => {
+          const ext = a.fileName.split(".").pop()?.toUpperCase() ?? "PNG";
+          const re = /(\d{2,4})x(\d{2,4})/;
+          const dimsMatch = re.exec(a.fileName);
+          const dimStr = dimsMatch ? `${dimsMatch[1]}x${dimsMatch[2]}` : "";
+          return {
+            id: `${a.category}-${a.fileName}`,
+            url: a.previewUrl ?? a.downloadUrl,
+            filename: a.fileName,
+            meta: {
+              size: dimStr || a.category,
+              style: a.category,
+              format: ext,
+            },
+          };
+        },
+      );
       setVariants(newVariants);
       // Capture meta tags for display section
       setMetaHtml(res.metaTags?.html ?? null);
       setMetaFileUrl(res.metaTags?.fileUrl ?? null);
       // Engine guidance (e.g., ImageMagick recommendation)
-      const engineInfo = (res as unknown as { engine?: string; engineNote?: string });
+      const engineInfo = res as unknown as {
+        engine?: string;
+        engineNote?: string;
+      };
       if (engineInfo.engine && engineInfo.engine !== "magick") {
-        const note = engineInfo.engineNote ?? "Install ImageMagick for best quality (brew install imagemagick).";
+        const note =
+          engineInfo.engineNote ??
+          "Install ImageMagick for best quality (brew install imagemagick).";
         setInfoMsg(`Using ${engineInfo.engine}. ${note}`);
       }
     } catch (err) {
@@ -202,7 +222,12 @@ const progressOp = progressData?.currentOperation ?? "Working...";
       }
     } catch (err) {
       console.error("[pixel-forge] zip download failed", err);
-      setErrorMsg(readableError(err, "ZIP creation failed. Falling back to individual downloads."));
+      setErrorMsg(
+        readableError(
+          err,
+          "ZIP creation failed. Falling back to individual downloads.",
+        ),
+      );
       // Fallback: sequential downloads
       for (const v of variants) {
         await delay(80);
@@ -218,10 +243,14 @@ const progressOp = progressData?.currentOperation ?? "Working...";
         <header className="mb-6 flex items-center justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl font-bold tracking-tight">
-              SEO <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">Foundry • Pixel Forge</span>
+              SEO{" "}
+              <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">
+                Foundry • Pixel Forge
+              </span>
             </h1>
             <p className="text-sm text-white/70">
-              Upload an image, choose options, and generate beautiful variants optimized for your needs.
+              Upload an image, choose options, and generate beautiful variants
+              optimized for your needs.
             </p>
           </div>
 
@@ -257,7 +286,11 @@ const progressOp = progressData?.currentOperation ?? "Working...";
                 </div>
               ) : null}
               {/* Upload */}
-              <UploadArea previewUrl={sourceUrl ?? null} onUpload={onUpload} onClear={onClearUpload} />
+              <UploadArea
+                previewUrl={sourceUrl ?? null}
+                onUpload={onUpload}
+                onClear={onClearUpload}
+              />
 
               {/* Actions */}
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -278,7 +311,11 @@ const progressOp = progressData?.currentOperation ?? "Working...";
 
                   <button
                     type="button"
-                    disabled={!variants.length || generating || zipAssetsMutation.isPending}
+                    disabled={
+                      !variants.length ||
+                      generating ||
+                      zipAssetsMutation.isPending
+                    }
                     onClick={onDownloadAll}
                     className={[
                       "rounded-md px-3 py-2 text-xs font-medium transition",
@@ -287,7 +324,9 @@ const progressOp = progressData?.currentOperation ?? "Working...";
                         : "cursor-not-allowed border border-white/10 bg-white/5 text-white/50",
                     ].join(" ")}
                   >
-                    {zipAssetsMutation.isPending ? "Preparing ZIP..." : "Download All"}
+                    {zipAssetsMutation.isPending
+                      ? "Preparing ZIP..."
+                      : "Download All"}
                   </button>
                 </div>
 
@@ -307,7 +346,9 @@ const progressOp = progressData?.currentOperation ?? "Working...";
                     </>
                   ) : (
                     <span className="text-white/60">
-                      {variants.length ? `${variants.length} variants ready` : "No variants yet"}
+                      {variants.length
+                        ? `${variants.length} variants ready`
+                        : "No variants yet"}
                     </span>
                   )}
                 </div>
@@ -327,7 +368,9 @@ const progressOp = progressData?.currentOperation ?? "Working...";
               {metaHtml ? (
                 <section className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
                   <div className="mb-2 flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-white/90">Meta Tags</h3>
+                    <h3 className="text-sm font-semibold text-white/90">
+                      Meta Tags
+                    </h3>
                     <div className="flex items-center gap-2">
                       {metaFileUrl ? (
                         <a
@@ -380,11 +423,18 @@ function triggerDownload(dataUrl: string, filename: string) {
 function readableError(err: unknown, fallback: string): string {
   if (typeof err === "object" && err !== null) {
     const withMsg = err as { message?: unknown; cause?: unknown };
-    if (typeof withMsg.message === "string" && withMsg.message.trim().length > 0) {
+    if (
+      typeof withMsg.message === "string" &&
+      withMsg.message.trim().length > 0
+    ) {
       return withMsg.message;
     }
     const cause = withMsg.cause as { message?: unknown } | undefined;
-    if (cause && typeof cause.message === "string" && cause.message.trim().length > 0) {
+    if (
+      cause &&
+      typeof cause.message === "string" &&
+      cause.message.trim().length > 0
+    ) {
       return cause.message;
     }
   }

@@ -13,19 +13,22 @@ export default function UploadArea({ previewUrl, onUpload, onClear }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
-  const handleFiles = useCallback((files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    const file = files.item(0);
-    if (!file) return;
-    if (!file.type.startsWith("image/")) return;
+  const handleFiles = useCallback(
+    (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      const file = files.item(0);
+      if (!file) return;
+      if (!file.type.startsWith("image/")) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      onUpload(file, result);
-    };
-    reader.readAsDataURL(file);
-  }, [onUpload]);
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        onUpload(file, result);
+      };
+      reader.readAsDataURL(file);
+    },
+    [onUpload],
+  );
 
   const onDrop = useCallback(
     (e: React.DragEvent) => {
@@ -78,9 +81,15 @@ export default function UploadArea({ previewUrl, onUpload, onClear }: Props) {
                 strokeLinejoin="round"
                 d="M3 16.5V8.25A2.25 2.25 0 0 1 5.25 6h6.879a2.25 2.25 0 0 1 1.59.659l3.621 3.621a2.25 2.25 0 0 1 .66 1.591V16.5A2.25 2.25 0 0 1 15.75 18.75H5.25A2.25 2.25 0 0 1 3 16.5z"
               />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5l5.25-5.25L15 18" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M3 16.5l5.25-5.25L15 18"
+              />
             </svg>
-            <p className="mb-2 text-sm text-white/80">Drag & drop an image here</p>
+            <p className="mb-2 text-sm text-white/80">
+              Drag & drop an image here
+            </p>
             <p className="mb-4 text-xs text-white/60">PNG, JPG, or WebP</p>
             <div className="flex items-center gap-3">
               <button
@@ -101,7 +110,7 @@ export default function UploadArea({ previewUrl, onUpload, onClear }: Props) {
           </>
         ) : (
           <div className="relative h-full w-full">
-            <div className="relative h-full w-full rounded-lg overflow-hidden">
+            <div className="relative h-full w-full overflow-hidden rounded-lg">
               <Image
                 src={previewUrl}
                 alt="Preview"
@@ -112,14 +121,16 @@ export default function UploadArea({ previewUrl, onUpload, onClear }: Props) {
                 priority={false}
               />
             </div>
-            <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-inset ring-white/10" />
+            <div className="pointer-events-none absolute inset-0 rounded-lg ring-1 ring-white/10 ring-inset" />
           </div>
         )}
       </div>
 
       <div className="mt-3 flex items-center justify-between">
         <p className="text-xs text-white/60">
-          {previewUrl ? "Image ready. Configure options and generate variants." : "No file selected."}
+          {previewUrl
+            ? "Image ready. Configure options and generate variants."
+            : "No file selected."}
         </p>
         <div className="flex items-center gap-2">
           <button

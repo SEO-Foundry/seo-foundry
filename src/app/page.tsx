@@ -19,10 +19,11 @@ export default function Home() {
                 </span>
               </h1>
               <p className="max-w-2xl text-balance text-white/80">
-                A collection of handcrafted tools for bootstrapping everything your site
-                needs to be discoverable and fast. Forge pixel-perfect social previews,
-                favicons, PWA icons, and pristine metadata. Then shape your structured data
-                with schema utilities — all from one workshop.
+                A collection of handcrafted tools for bootstrapping everything
+                your site needs to be discoverable and fast. Forge pixel-perfect
+                social previews, favicons, PWA icons, and pristine metadata.
+                Then shape your structured data with schema utilities — all from
+                one workshop.
               </p>
 
               <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -44,7 +45,8 @@ export default function Home() {
                   Tools on the Anvil
                 </h2>
                 <p className="mt-1 text-sm text-white/60">
-                  Explore focused, production-ready utilities — forged to accelerate new builds.
+                  Explore focused, production-ready utilities — forged to
+                  accelerate new builds.
                 </p>
               </div>
 
@@ -64,8 +66,9 @@ export default function Home() {
                         Pixel Forge
                       </h3>
                       <p className="mt-1 max-w-[42ch] text-sm text-white/70">
-                        Generate favicons, PWA icons, OpenGraph images, and plug-and-play
-                        metadata. One source image, a full kit of assets — fast.
+                        Generate favicons, PWA icons, OpenGraph images, and
+                        plug-and-play metadata. One source image, a full kit of
+                        assets — fast.
                       </p>
                     </div>
                     <span className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[10px] text-white/75 transition group-hover:border-emerald-400/30 group-hover:bg-emerald-400/10 group-hover:text-emerald-100">
@@ -100,8 +103,9 @@ export default function Home() {
                         Schema Smith
                       </h3>
                       <p className="mt-1 max-w-[42ch] text-sm text-white/70">
-                        Craft JSON-LD quickly with guided presets for common pages and entities.
-                        Validate, preview, and ship with confidence.
+                        Craft JSON-LD quickly with guided presets for common
+                        pages and entities. Validate, preview, and ship with
+                        confidence.
                       </p>
                     </div>
                     <span className="rounded-md border border-white/10 bg-white/10 px-2 py-1 text-[10px] text-white/75 transition group-hover:border-indigo-400/30 group-hover:bg-indigo-400/10 group-hover:text-indigo-100">
@@ -124,7 +128,6 @@ export default function Home() {
             </div>
           </div>
         </section>
-
       </div>
     </main>
   );

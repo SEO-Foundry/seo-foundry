@@ -27,7 +27,15 @@ type Props = {
   onClearResults?: () => void;
 };
 
-const CATEGORY_ORDER = ["favicon", "pwa", "social", "web", "seo", "transparent", "other"] as const;
+const CATEGORY_ORDER = [
+  "favicon",
+  "pwa",
+  "social",
+  "web",
+  "seo",
+  "transparent",
+  "other",
+] as const;
 const CATEGORY_LABEL: Record<string, string> = {
   favicon: "Favicon",
   pwa: "PWA",
@@ -56,19 +64,27 @@ export default function ResultGrid({
   if (!variants?.length) {
     return (
       <div className="rounded-2xl border border-white/10 bg-white/5 p-6 text-center text-white/60">
-        Generated variants will appear here after you upload an image and click Generate.
+        Generated variants will appear here after you upload an image and click
+        Generate.
       </div>
     );
   }
 
   // Group variants by category
-  const buckets = variants.reduce((acc, v) => {
-    const key = (v.category ?? v.meta?.style ?? "other").toLowerCase();
-    (acc[key] ??= []).push(v);
-    return acc;
-  }, {} as Record<string, VariantItem[]>);
+  const buckets = variants.reduce(
+    (acc, v) => {
+      const key = (v.category ?? v.meta?.style ?? "other").toLowerCase();
+      (acc[key] ??= []).push(v);
+      return acc;
+    },
+    {} as Record<string, VariantItem[]>,
+  );
 
-  const orderedGroups: Array<{ key: string; label: string; items: VariantItem[] }> = [];
+  const orderedGroups: Array<{
+    key: string;
+    label: string;
+    items: VariantItem[];
+  }> = [];
   for (const k of CATEGORY_ORDER) {
     const items = buckets[k];
     if (items?.length) {
@@ -80,14 +96,20 @@ export default function ResultGrid({
     (k) => !CATEGORY_ORDER.includes(k as (typeof CATEGORY_ORDER)[number]),
   );
   for (const k of remaining) {
-    orderedGroups.push({ key: k, label: CATEGORY_LABEL[k] ?? k, items: buckets[k]! });
+    orderedGroups.push({
+      key: k,
+      label: CATEGORY_LABEL[k] ?? k,
+      items: buckets[k]!,
+    });
   }
 
   return (
     <section className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-[0_0_0_1px_rgba(255,255,255,0.05)]">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-white/90">Generated Variants</h3>
+          <h3 className="text-sm font-semibold text-white/90">
+            Generated Variants
+          </h3>
           <p className="text-xs text-white/60">{variants.length} images</p>
         </div>
         <div className="flex items-center gap-2">
@@ -113,7 +135,7 @@ export default function ResultGrid({
           <div key={group.key}>
             <div className="mb-2 flex items-center justify-between">
               <h4
-                className="text-xs font-semibold uppercase tracking-wide text-white/60"
+                className="text-xs font-semibold tracking-wide text-white/60 uppercase"
                 title={`Category: ${group.label}`}
               >
                 {group.label} ({group.items.length})
@@ -122,7 +144,9 @@ export default function ResultGrid({
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
               {group.items.map((v) => {
                 const resolution =
-                  v.width && v.height ? `${v.width}x${v.height}` : v.meta?.size || "";
+                  v.width && v.height
+                    ? `${v.width}x${v.height}`
+                    : v.meta?.size || "";
                 const sizeStr = formatBytes(v.bytes);
                 const tooltip = `${v.filename}\n${group.label} • ${resolution} • ${sizeStr}`;
                 return (
@@ -149,7 +173,9 @@ export default function ResultGrid({
                     <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(600px_circle_at_0%_0%,rgba(99,102,241,0.08),transparent_50%),radial-gradient(600px_circle_at_100%_100%,rgba(16,185,129,0.08),transparent_50%)]" />
                     <figcaption className="flex items-center justify-between gap-2 border-t border-white/10 bg-gradient-to-b from-white/0 to-white/5 px-3 py-2">
                       <div className="min-w-0">
-                        <p className="truncate text-[11px] text-white/80">{v.filename}</p>
+                        <p className="truncate text-[11px] text-white/80">
+                          {v.filename}
+                        </p>
                         <p className="truncate text-[10px] text-white/50">
                           {group.label}
                           {resolution ? ` • ${resolution}` : ""} • {sizeStr}
@@ -183,10 +209,14 @@ export default function ResultGrid({
           >
             <div className="mb-3 flex items-center justify-between">
               <div className="min-w-0">
-                <p className="truncate text-sm text-white/90">{active.filename}</p>
+                <p className="truncate text-sm text-white/90">
+                  {active.filename}
+                </p>
                 <p className="truncate text-xs text-white/60">
                   {(active.category ?? active.meta?.style) || ""} •{" "}
-                  {active.width && active.height ? `${active.width}x${active.height}` : active.meta?.size}
+                  {active.width && active.height
+                    ? `${active.width}x${active.height}`
+                    : active.meta?.size}
                 </p>
               </div>
               <div className="flex items-center gap-2">
