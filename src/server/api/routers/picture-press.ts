@@ -6,8 +6,10 @@ import { TRPCError } from "@trpc/server";
 import {
   convertImages,
   validateConversionOptions,
+  ConversionPerformanceMonitor,
   type ConversionOptions,
   type ConversionResult,
+  type BatchProcessingOptions,
 } from "@/server/lib/picture-press/converter";
 import {
   createPicturePressSession,
@@ -429,14 +431,27 @@ export const picturePressRouter = createTRPCRouter({
           });
         };
 
-        // Perform the conversion with enhanced error handling
+        // Determine optimal batch processing options based on file count and system resources
+        const batchOptions: BatchProcessingOptions = {
+          maxConcurrency: Math.min(4, Math.max(1, Math.floor(totalFiles / 3))),
+          memoryThreshold: 512, // 512MB threshold
+          progressGranularity: Math.max(1, Math.floor(totalFiles / 10)), // Report every 10%
+          enableMemoryMonitoring: true,
+          timeoutPerFile: 45, // 45 seconds per file
+        };
+
+        // Perform the conversion with enhanced error handling and performance monitoring
         let conversionResults: ConversionResult[];
+        // Track conversion start time for performance monitoring
+        const _conversionStartTime = Date.now();
+        
         try {
           conversionResults = await convertImages(
             inputFiles,
             sessPaths.convertedDir,
             input.options as ConversionOptions,
             progressCallback,
+            batchOptions,
           );
         } catch (err) {
           // Update status to error
@@ -659,6 +674,35 @@ export const picturePressRouter = createTRPCRouter({
       await cleanupPicturePressSession(input.sessionId);
       return { ok: true };
     }),
+
+  // Get performance metrics and system resource information
+  getPerformanceMetrics: publicProcedure.query(async ({ ctx }) => {
+    const rateKey = limiterKey("pp:metrics", ctx.headers);
+    if (!enforceFixedWindowLimit(rateKey, 10, 60_000)) {
+      throw new TRPCError({
+        code: "TOO_MANY_REQUESTS",
+        message: "Too many metrics requests, please slow down.",
+      });
+    }
+
+    const recentMetrics = ConversionPerformanceMonitor.getRecentMetrics(5);
+    const averageMetrics = ConversionPerformanceMonitor.getAverageMetrics();
+    const systemInfo = ConversionPerformanceMonitor.getSystemResourceInfo();
+
+    return {
+      recent: recentMetrics,
+      averages: averageMetrics,
+      system: {
+        memoryUsage: {
+          used: Math.round(systemInfo.memoryUsage.heapUsed / (1024 * 1024)), // MB
+          total: Math.round(systemInfo.memoryUsage.heapTotal / (1024 * 1024)), // MB
+          external: Math.round(systemInfo.memoryUsage.external / (1024 * 1024)), // MB
+        },
+        uptime: Math.round(systemInfo.uptime / 3600), // hours
+        cpuUsage: systemInfo.cpuUsage,
+      },
+    };
+  }),
 });
 
 export type PicturePressRouter = typeof picturePressRouter;

@@ -261,7 +261,7 @@ A full integration guide with data flow and operational details is provided here
 - Pixel Forge Integration Guide: [docs/pixel-forge-integration.md](docs/pixel-forge-integration.md)
 
 Quick pointers:
-- UI route: open http://localhost:3000/pixel-forge
+- UI route: open http://localhost:3000/pixel-forge (or your configured NEXT_PUBLIC_API_BASE_URL)
 - Server router: [pixel-forgeRouter](src/server/api/routers/pixel-forge.ts:51)
   - newSession, uploadImage, generateAssets, getGenerationProgress, zipAssets, cleanupSession, cleanupExpired
 - Session storage utilities: [session.ts](src/server/lib/pixel-forge/session.ts:1)
