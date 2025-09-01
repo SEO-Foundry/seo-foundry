@@ -1,5 +1,6 @@
 import { postRouter } from "@/server/api/routers/post";
 import { pixelForgeRouter } from "@/server/api/routers/pixel-forge";
+import { picturePressRouter } from "@/server/api/routers/picture-press";
 import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 
 /**
@@ -10,6 +11,7 @@ import { createCallerFactory, createTRPCRouter } from "@/server/api/trpc";
 export const appRouter = createTRPCRouter({
   post: postRouter,
   pixelForge: pixelForgeRouter,
+  picturePress: picturePressRouter,
 });
 
 // export type definition of API
