@@ -16,9 +16,7 @@ import {
 } from "@/server/lib/pixel-forge/session";
 import { ensureImageEngine } from "@/server/lib/pixel-forge/deps";
 import { generateAssets as pfGenerateAssets } from "pixel-forge";
-import archiver from "archiver";
-import type { Archiver } from "archiver";
-import { createWriteStream } from "fs";
+import { createDirectoryZip } from "@/server/lib/shared/zip-utils";
 import { promises as fsp } from "fs";
 import { imageSize } from "image-size";
 import {
@@ -358,18 +356,7 @@ export const pixelForgeRouter = createTRPCRouter({
         const zipPath = path.join(sess.root, "assets.zip");
 
         // Build ZIP archive
-        await new Promise<void>((resolve, reject) => {
-          const output = createWriteStream(zipPath);
-          const archive: Archiver = archiver("zip", { zlib: { level: 9 } });
-
-          output.on("close", resolve);
-          archive.on("error", reject);
-
-          archive.pipe(output);
-          // Add generated directory contents at root of archive
-          archive.directory(sess.generatedDir, false);
-          void archive.finalize();
-        });
+        await createDirectoryZip(sess.generatedDir, zipPath);
 
         const stat = await fsp.stat(zipPath).catch(() => null);
         const zipUrl = toFileUrl(input.sessionId, sess.root, zipPath);
