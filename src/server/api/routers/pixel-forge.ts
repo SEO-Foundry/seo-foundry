@@ -48,7 +48,11 @@ type PixelForgeResult = {
 };
 
 // Helper to construct a stable file URL that a future route handler will serve
-function toFileUrl(sessionId: string, sessionRoot: string, absoluteFilePath: string): string {
+function toFileUrl(
+  sessionId: string,
+  sessionRoot: string,
+  absoluteFilePath: string,
+): string {
   const rel = path.relative(sessionRoot, absoluteFilePath);
   const encodedParts = rel.split(path.sep).map(encodeURIComponent).join("/");
   return `/api/pixel-forge/files/${encodeURIComponent(sessionId)}/${encodedParts}`;
@@ -75,12 +79,19 @@ export const pixelForgeRouter = createTRPCRouter({
       z.object({
         fileName: z.string().min(1),
         fileData: z.string().min(1), // raw base64 (no data URL prefix)
-        mimeType: z.string().min(1).refine((m) => isAllowedMime(m), "Unsupported MIME type"),
+        mimeType: z
+          .string()
+          .min(1)
+          .refine((m) => isAllowedMime(m), "Unsupported MIME type"),
         sessionId: z.string().uuid().optional(),
       }),
     )
     .mutation(async ({ ctx, input }) => {
-      const rateKey = limiterKey("pf:upload", ctx.headers, input.sessionId ?? null);
+      const rateKey = limiterKey(
+        "pf:upload",
+        ctx.headers,
+        input.sessionId ?? null,
+      );
       if (!enforceFixedWindowLimit(rateKey, 30, 60_000)) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
@@ -116,7 +127,9 @@ export const pixelForgeRouter = createTRPCRouter({
         throw new TRPCError({
           code: "BAD_REQUEST",
           message:
-            err instanceof Error ? err.message : "Upload failed due to invalid file or size limit",
+            err instanceof Error
+              ? err.message
+              : "Upload failed due to invalid file or size limit",
           cause: err as Error,
         });
       }
@@ -206,7 +219,10 @@ export const pixelForgeRouter = createTRPCRouter({
 
       let result: PixelForgeResult;
       try {
-        result = (await pfGenerateAssets(imageAbsPath, pfOptions)) as PixelForgeResult;
+        result = (await pfGenerateAssets(
+          imageAbsPath,
+          pfOptions,
+        )) as PixelForgeResult;
       } catch (err) {
         await writePFProgress(sessionId, {
           current: 100,
@@ -386,7 +402,11 @@ export const pixelForgeRouter = createTRPCRouter({
   cleanupSession: publicProcedure
     .input(z.object({ sessionId: z.string().uuid() }))
     .mutation(async ({ ctx, input }) => {
-      const rateKey = limiterKey("pf:cleanupSession", ctx.headers, input.sessionId);
+      const rateKey = limiterKey(
+        "pf:cleanupSession",
+        ctx.headers,
+        input.sessionId,
+      );
       if (!enforceFixedWindowLimit(rateKey, 10, 60_000)) {
         throw new TRPCError({
           code: "TOO_MANY_REQUESTS",
