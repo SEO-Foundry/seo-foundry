@@ -29,9 +29,8 @@ export default function Header() {
             <div className="flex items-center gap-2">
               <span className="inline-block h-2 w-2 rounded-full bg-emerald-400" />
               <span className="text-sm font-semibold tracking-wide text-white/90">
-                SEO{" "}
                 <span className="bg-gradient-to-r from-indigo-300 via-emerald-200 to-cyan-200 bg-clip-text text-transparent">
-                  Foundry
+                SEO Foundry
                 </span>
               </span>
             </div>
